@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package sms;
+
+option go_package = "tycoon.systems/tycoon-services;tycoon_services";
+
+service smsManagement {
+    rpc CreateNewSmsBlast (NewMsg) returns (Msg) {}
+}
+
+message NewMsg {
+    string from = 1;
+    string content = 2;
+}
+
+message Msg {
+    string from = 1;
+    string content = 2;
+    int32 jobId = 3;
+}
