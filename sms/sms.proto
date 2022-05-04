@@ -9,12 +9,15 @@ service smsManagement {
 }
 
 message NewMsg {
-    string from = 1;
-    string content = 2;
+    string      From = 1;
+    string      Content = 2;
+    string      Username = 3;
+    string      Identifier = 4;
+    string      Hash = 5;
 }
 
 message Msg {
-    string from = 1;
-    string content = 2;
-    int32 jobId = 3;
+    string      From = 1;
+    string      Content = 2;
+    string      JobId = 3;
 }

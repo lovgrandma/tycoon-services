@@ -1,12 +1,11 @@
-package MessageInfo
-
+package main
 
 import (
 	"context"
 	"log"
-	"math/rand"
 	"github.com/google/uuid"
 	"net"
+	"tycoon.systems/tycoon-services/s3credentials"
 
 	pb "tycoon.systems/tycoon-services/sms"
 	"google.golang.org/grpc"
@@ -17,13 +16,15 @@ const (
 )
 
 type SmsManagementServer struct {
-	ph.UnimplementedSmsManagementServer
+	pb.UnimplementedSmsManagementServer
 }
 
 func (s *SmsManagementServer) CreateNewSmsBlast(ctx context.Context, in *pb.NewMsg) (*pb.Msg, error) {
-	log.PrintF("Received: %v, %v", in.GetContent(), in.GetFrom())
-	var jobId string = uuid.New()
-	return &pb.Msg{content: in.GetContent(), from: in.getFrom(), jobId: jobId }, nil
+	log.Printf("Received: %v, %v, %v, %v, %v", in.GetContent(), in.GetFrom(), in.GetUsername(), in.GetIdentifier(), in.GetHash());
+	s3Data := s3credentials.GetS3Data("frontend", "local", "")
+	log.Printf("S3 data %v", s3Data)
+	jobId := uuid.NewString()
+	return &pb.Msg{Content: in.GetContent(), From: in.GetFrom(), JobId: jobId }, nil
 }
 
 func main() {
@@ -34,7 +35,7 @@ func main() {
 
 	s := grpc.NewServer()
 	pb.RegisterSmsManagementServer(s, &SmsManagementServer{})
-	log.Printf("Server listening at %v", lis.addr())
+	log.Printf("Server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("Failed to server: %v", err)
 	}
