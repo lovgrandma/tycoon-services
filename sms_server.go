@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"net"
 	"reflect"
-	"tycoon.systems/tycoon-services/s3credentials"
+	"tycoon.systems/tycoon-services/security"
 	"errors"
 
 	pb "tycoon.systems/tycoon-services/sms"
@@ -30,11 +30,11 @@ func (s *SmsManagementServer) CreateNewSmsBlast(ctx context.Context, in *pb.NewM
 	reflect.TypeOf(in.GetHash()).Kind() == reflect.String {
 		if len(in.GetContent()) > 0 && len(in.GetFrom()) > 0 && len(in.GetUsername()) > 0 && len(in.GetIdentifier()) > 0 && len(in.GetHash()) > 0 {
 			log.Printf("Received: %v, %v, %v, %v, %v", in.GetContent(), in.GetFrom(), in.GetUsername(), in.GetIdentifier(), in.GetHash())
-			s3Data := s3credentials.GetS3Data("mongo", "u", "")
-			log.Printf("S3 data %v", s3Data)
-			// Access mongo and check user identifier against hash to determine if request should be honoured 
-			jobId := uuid.NewString()
-			return &pb.Msg{Content: in.GetContent(), From: in.GetFrom(), JobId: jobId }, nil
+			var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetFrom(), in.GetIdentifier(), in.GetHash())// Access mongo and check user identifier against hash to determine if request should be honoured
+			if authenticated != false {
+				jobId := uuid.NewString()
+				return &pb.Msg{Content: in.GetContent(), From: in.GetFrom(), JobId: jobId }, nil
+			}
 		}
 	}
 	err := errors.New("Request to Sms Service failed")
