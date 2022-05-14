@@ -18,3 +18,21 @@ type User struct {
 	Payment string
 	Subscriptions []interface{}
 }
+
+type Msg struct {
+    From string
+    Content string
+    JobId string
+}
+
+type Number struct {
+	ID string `bson:"_id" json:"id,omitempty"`
+	number string
+	UserId string
+	SmsUrl string
+	VoiceUrl string
+	Status string
+	Sid string
+	Subs []interface{}
+	Chats []interface{}
+}

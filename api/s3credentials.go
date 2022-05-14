@@ -3,7 +3,7 @@ package s3credentials
 import (
     "encoding/json"
     "log"
-    "fmt"
+    // "fmt"
     "strconv"
 )
 
@@ -52,7 +52,8 @@ func returnRawJsonBytes() []byte {
             "adviewsport": 6382,
             "dailyadlimitsport": 6383,
             "channelsubscriptionsport": 6384,
-            "mpstnumbersport": 6385
+            "mpstnumbersport": 6385,
+            "tycoon_systems_queue_port": 6386
         },
         "twilio": {
             "sid": "ACdebcfdac964631e37cfb607dfb5204b2",
@@ -67,7 +68,9 @@ func returnRawJsonBytes() []byte {
             "authToken": "10d8e3b8d91e74e704f79a24efdc5daf",
             "number1": "+15878472951",
             "verifySid": "VAd7de6af9d6acc780ad2550bad2c25716",
-            "passwordResetSid": "VAe19c574e6c956aa74a216963b3071b4f"
+            "passwordResetSid": "VAe19c574e6c956aa74a216963b3071b4f",
+            "messagingServiceSid": "MG8acfe8f785fa20d02e4e601c1c1ca934",
+            "notifyServicesSid": "ISb2335db9f58b9e7a4140bc8910004dbf"
         },
         "stripe": {
             "testkey": "sk_test_51IEf8CAu2LTYmPsqs4Qhdwu5oQ9QAt9kpc98Jz8bfkx37ub0p1J9W0U1Id584zl4TEsgVdsjvJrXANp4QPI3YQ9E00MBxqsb3C",
@@ -111,7 +114,7 @@ func runSwitch(key string, nested string, nested2 string, m map[string]interface
     for a, b := range m {
         switch bb := b.(type) {
         case string:
-            fmt.Println("String", a, bb, i, parent)
+            // fmt.Println("String", a, bb, i, parent)
             if i == 0 && a == key {
                 return bb
             } else if (i == 1 && a == nested && parent == key) {
@@ -120,7 +123,7 @@ func runSwitch(key string, nested string, nested2 string, m map[string]interface
                 return bb
             }
         case int:
-            fmt.Println("Int", a, bb, i, parent)
+            // fmt.Println("Int", a, bb, i, parent)
             if i == 0 && a == key {
                 return strconv.Itoa(bb)
             } else if (i == 1 && a == nested && parent == key) {
@@ -129,7 +132,7 @@ func runSwitch(key string, nested string, nested2 string, m map[string]interface
                 return strconv.Itoa(bb)
             }
         case float64:
-            fmt.Println("Float", a, bb, i, parent)
+            // fmt.Println("Float", a, bb, i, parent)
             if i == 0 && a == key {
                 return strconv.FormatFloat(bb, 'f', 0, 64)
             } else if (i == 1 && a == nested && parent == key) {
@@ -140,7 +143,7 @@ func runSwitch(key string, nested string, nested2 string, m map[string]interface
         case []interface{}: // If type array
             continue
         case interface{}:
-            fmt.Println("Interface", a, bb, a, i)
+            // fmt.Println("Interface", a, bb, a, i)
             n := bb.(map[string]interface{})
             match := runSwitch(key, nested, nested2, n, i, a)
             if (match != "nomatch") {
