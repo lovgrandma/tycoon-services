@@ -11,12 +11,15 @@ import (
 	"reflect"
 	"encoding/json"
 	"fmt"
-	"strings"
+	// "strings"
 	"log"
 	"github.com/twilio/twilio-go"
-	// openapi "github.com/twilio/twilio-go/rest/api/v2010"
-	notifyapi "github.com/twilio/twilio-go/rest/notify/v1"
+	openapi "github.com/twilio/twilio-go/rest/api/v2010"
+	// notifyapi "github.com/twilio/twilio-go/rest/notify/v1"
 	messagingapi "github.com/twilio/twilio-go/rest/messaging/v1"
+	"github.com/go-redis/redis/v8"
+	"tycoon.systems/tycoon-services/sms/sms_utility"
+	"time"
 )
 
 var (
@@ -31,6 +34,11 @@ var (
 	client, err = mongo.Connect(context.TODO(), clientOpts)
 	jobQueueAddr = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_queue_port", "")
 	jobClient = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
+	rdb = redis.NewClient(&redis.Options{
+        Addr:     s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "mpstnumbersport", ""),
+        Password: "", // no password set
+        DB:       0,  // use default DB
+    })
 )
 
 const (
@@ -54,7 +62,7 @@ func ProvisionSmsJob(msg structs.Msg) string {
 		if err != nil {
 			log.Printf("Could not create Sms Delivery task at Enqueue: %v", err)
 		}
-		log.Printf("Enqueued Sms Delivery task: %v %v %v %v %v %v %v", info.ID, info.Queue, info.State, info.Timeout, info.LastErr, info.Type, info)
+		// log.Printf("Enqueued Sms Delivery task: %v %v %v %v %v %v %v", info.ID, info.Queue, info.State, info.Timeout, info.LastErr, info.Type, info)
 		return info.ID
 	}
 	return "failed"
@@ -93,7 +101,7 @@ func PerformSmsDelivery(msg structs.Msg) error {
 	}
 	coll := client.Database("mpst").Collection("numbers")
 	record := &structs.Number{}
-	err := coll.FindOne(context.TODO(), bson.D{{"number", msg.From}}).Decode(&record)
+	err := coll.FindOne(context.TODO(), bson.D{{"number", msg.From}}).Decode(&record) // Get from phone number data
 	if err != nil {
 		return fmt.Errorf("failure %v", err)
 	}
@@ -101,48 +109,81 @@ func PerformSmsDelivery(msg structs.Msg) error {
 		Username: s3credentials.GetS3Data("twilioMpst", "sid", ""),
 		Password: s3credentials.GetS3Data("twilioMpst", "authToken", ""),
 	})
-	var pg int = 1000
-	var lmt int = 1000000
-	services, err := twilioClient.MessagingV1.ListService(&messagingapi.ListServiceParams{
-		PageSize: &pg,
-		Limit: &lmt,
+	service, err := twilioClient.MessagingV1.CreateService(&messagingapi.CreateServiceParams{
+		FriendlyName: &msg.From,
 	})
 	if err != nil {
-		return fmt.Errorf("failure %v", err)	
-	} else if services != nil {
-		if reflect.TypeOf(*services[0].FriendlyName).Kind() == reflect.String {
-			strVal := *services[0].FriendlyName
-			if strVal == "tycoon-services-messaging" {
-				var numSid *string
-				numSid = &record.Sid
-				viableNumber, err := twilioClient.MessagingV1.CreatePhoneNumber(*services[0].Sid, &messagingapi.CreatePhoneNumberParams{
-					PhoneNumberSid: numSid,
-				})
-				if (err != nil && strings.Contains(err.Error(), _phoneAlreadyListedCheck) == true) || viableNumber != nil {
-					fmt.Printf("GOood")
-					var bodyStr *string
-					bodyStr = &msg.Content
-					notification, err := twilioClient.NotifyV1.CreateNotification(*services[0].Sid, &notifyapi.CreateNotificationParams{
-						Body: bodyStr,
-					})
-					if err != nil {
-						return fmt.Errorf("failure %v", err)
-					} else {
-						fmt.Printf("Notif %v", notification)
-					}
-				} else {
-					return fmt.Errorf("failure %v", err)
-				}
-			}
-		}
+		return fmt.Errorf("failure %v", err)
 	}
-	// twilio.notify.services(s3credentials.GetS3Data("twilioMpst", "notifyServicesSid", ""))
+	var numSid *string
+	numSid = &record.Sid
+	createdNumber, err := twilioClient.MessagingV1.CreatePhoneNumber(*service.Sid, &messagingapi.CreatePhoneNumberParams{
+		PhoneNumberSid: numSid,
+	})
+	if err != nil {
+		DeleteService(*twilioClient, *service.Sid)
+		return fmt.Errorf("failure %v", err)
+	}
 	switch reflect.TypeOf(record.Subs).Kind() {
 		case reflect.Slice:
 			s := reflect.ValueOf(record.Subs)
 			for i := 0; i < s.Len(); i++ {
-				fmt.Println(s.Index(i))
+				if reflect.TypeOf(record.Subs[i]).Kind() == reflect.String {
+					var to string = record.Subs[i].(string)
+					params := &openapi.CreateMessageParams{
+						To: &to,
+						From: &msg.From,
+						Body: &msg.Content,
+					}
+					_, err := twilioClient.ApiV2010.CreateMessage(params)
+					if err != nil {
+						fmt.Printf("Err sending message to %v. Err: %v", to, err)
+					}
+					UpdateRedisConverstaion(to, msg.From, msg.Content, i)
+				}
 			}
-    }
+		default:
+			fmt.Printf("Invalid subs record type, expecting string")
+	}
+	RemovePhoneNumberFromService(*twilioClient, *service.Sid, *createdNumber.Sid)
+	DeleteService(*twilioClient, *service.Sid)
+	return nil
+}
+
+func RemovePhoneNumberFromService(twilioClient twilio.RestClient, serviceSid string, phoneSid string) error {
+	err := twilioClient.MessagingV1.DeletePhoneNumber(serviceSid, phoneSid)
+	return err
+}
+
+func DeleteService(twilioClient twilio.RestClient, serviceSid string) error {
+	err := twilioClient.MessagingV1.DeleteService(serviceSid)
+	return err
+}
+
+func UpdateRedisConverstaion(to string, from string, content string, i int) error {
+	resolvedKey := sms_utility.ResolveKey(to, from)
+	var ctx = context.Background()
+	result, err := rdb.Get(ctx, resolvedKey).Result()
+	if err == redis.Nil {
+		fmt.Printf("Conversation does not exist")
+	} else if err != nil {
+		return fmt.Errorf("Cannot update Redis converstaion for to: %v, from: %v, content: %v, Err: %v", to, from, content, err)
+	} else {
+		var chatLog structs.ChatLog
+		json.Unmarshal([]byte(result), &chatLog)
+		t := time.Now()
+		newLog := make(map[string]interface{})
+		newLog["author"] = from
+		newLog["content"] = content
+		newLog["timestamp"] = t.Format("2006/01/02 3:04:05 PM")
+		chatLog.Log = append(chatLog.Log, newLog)
+		safeChatLog := make(map[string]interface{}) 
+		safeChatLog["id"] = chatLog.Id
+		safeChatLog["users"] = chatLog.Users
+		safeChatLog["log"] = chatLog.Log
+		safeChatLog["host"] = chatLog.Host
+		memoryReadyData, _ := json.Marshal(safeChatLog)
+		rdb.Set(ctx, resolvedKey, memoryReadyData, 0)
+	}
 	return nil
 }
