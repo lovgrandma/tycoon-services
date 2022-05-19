@@ -16,7 +16,6 @@ func main() {
 }
 
 func BuildWorkerServer() {
-	log.Printf("%v", jobQueueAddr)
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: jobQueueAddr},
 		asynq.Config{

@@ -4,8 +4,12 @@ package sms;
 
 option go_package = "tycoon.systems/tycoon-services;tycoon_services";
 
+/* Methods that must be consumed by Node.js must start with lowercase.
+Methods that must be consumed by Go must start with uppercase. */
+
 service smsManagement {
     rpc CreateNewSmsBlast (NewMsg) returns (Msg) {}
+    rpc returnSmsJobResult (Msg) returns (Msg) {}
 }
 
 message NewMsg {

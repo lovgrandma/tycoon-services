@@ -20,6 +20,10 @@ import (
 	"github.com/go-redis/redis/v8"
 	"tycoon.systems/tycoon-services/sms/sms_utility"
 	"time"
+	
+	pb "tycoon.systems/tycoon-services/sms"
+	"google.golang.org/grpc"
+	"os"
 )
 
 var (
@@ -39,6 +43,8 @@ var (
         Password: "", // no password set
         DB:       0,  // use default DB
     })
+	returnJobResultPort = "6001"
+	returnJobResultAddr = s3credentials.GetS3Data("app", "prodhost", "")
 )
 
 const (
@@ -147,6 +153,7 @@ func PerformSmsDelivery(msg structs.Msg) error {
 	}
 	RemovePhoneNumberFromService(*twilioClient, *service.Sid, *createdNumber.Sid)
 	DeleteService(*twilioClient, *service.Sid)
+	returnFinishedJobReport(msg)
 	return nil
 }
 
@@ -178,7 +185,7 @@ func UpdateRedisConverstaion(to string, from string, content string, i int) erro
 		newLog["timestamp"] = t.Format("2006/01/02 3:04:05 PM")
 		chatLog.Log = append(chatLog.Log, newLog)
 		safeChatLog := make(map[string]interface{}) 
-		safeChatLog["id"] = chatLog.Id
+		safeChatLog["id"] = chatLog.ID
 		safeChatLog["users"] = chatLog.Users
 		safeChatLog["log"] = chatLog.Log
 		safeChatLog["host"] = chatLog.Host
@@ -186,4 +193,22 @@ func UpdateRedisConverstaion(to string, from string, content string, i int) erro
 		rdb.Set(ctx, resolvedKey, memoryReadyData, 0)
 	}
 	return nil
+}
+
+func returnFinishedJobReport(msg structs.Msg) {
+	useReturnJobResultAddr := returnJobResultAddr
+	if os.Getenv("dev") == "true" {
+		useReturnJobResultAddr = "localhost"
+	}
+	conn, err := grpc.Dial(useReturnJobResultAddr + ":" + returnJobResultPort, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		fmt.Printf("Err: %v", err)
+	}
+	if err == nil {
+		defer conn.Close()
+		c := pb.NewSmsManagementClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		c.ReturnSmsJobResult(ctx, &pb.Msg{From: msg.From, Content: msg.Content, JobId: msg.JobId})
+	}
 }

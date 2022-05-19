@@ -38,7 +38,7 @@ type Number struct {
 }
 
 type ChatLog struct {
-	Id 				string
+	ID 				string
 	Users 			[]interface{}
 	Log 			[]interface{}
 	Host 			string

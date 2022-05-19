@@ -4,8 +4,8 @@ go 1.18
 
 require (
 	google.golang.org/grpc v1.46.0
-	google.golang.org/protobuf v1.28.0
 	tycoon.systems/tycoon-services/security v0.0.0-00010101000000-000000000000
+	tycoon.systems/tycoon-services/sms v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/sms/sms_queue v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/sms/sms_queue/workers v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/structs v0.0.0-00010101000000-000000000000
@@ -38,6 +38,7 @@ require (
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4 // indirect
 	google.golang.org/genproto v0.0.0-20220503193339-ba3ae3f07e29 // indirect
+	google.golang.org/protobuf v1.28.0 // indirect
 	tycoon.systems/tycoon-services/s3credentials v0.0.0-00010101000000-000000000000 // indirect
 	tycoon.systems/tycoon-services/sms/sms_utility v0.0.0-00010101000000-000000000000 // indirect
 )
@@ -53,3 +54,5 @@ replace tycoon.systems/tycoon-services/structs => ./structs/
 replace tycoon.systems/tycoon-services/sms/sms_queue/workers => ./sms/sms_queue/workers/
 
 replace tycoon.systems/tycoon-services/sms/sms_utility => ./sms/sms_utility
+
+replace tycoon.systems/tycoon-services/sms => ./sms

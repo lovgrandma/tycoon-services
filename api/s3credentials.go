@@ -15,7 +15,8 @@ func returnRawJsonBytes() []byte {
     jsonData := []byte(`{ 
         "app": {
             "port": 5300,
-            "server": "3.22.158.110"
+            "server": "3.22.158.110",
+            "prodhost": "127.0.0.1"
         },
         "awsConfig": {
             "accessKeyId": "AKIAIPCMZT3QFEP2YAXQ",
