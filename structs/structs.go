@@ -19,6 +19,8 @@ type User struct {
 	Subscriptions 	[]interface{}
 }
 
+/* Message */
+
 type Msg struct {
     From 			string
     Content 		string
@@ -33,8 +35,13 @@ type Number struct {
 	VoiceUrl 		string
 	Status 			string
 	Sid 			string
-	Subs 			[]interface{}
+	Subs 			[]FromObj
 	Chats 			[]interface{}
+}
+
+type FromObj struct {
+	From			string
+	Filter			[]interface{}
 }
 
 type ChatLog struct {
@@ -42,4 +49,23 @@ type ChatLog struct {
 	Users 			[]interface{}
 	Log 			[]interface{}
 	Host 			string
+}
+
+/* Video */
+
+type Video struct {
+	ID				string
+	Author			string
+	Status			string
+	Publish			string
+	Mpd				string
+	Hls				string
+	Media			[]interface{}
+	Title			string
+	Description		string
+	Tags			[]interface{}
+	Production		string
+	Cast			[]interface{}
+	Directors		[]interface{}
+	Writers			[]interface{}
 }

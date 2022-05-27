@@ -134,8 +134,8 @@ func PerformSmsDelivery(msg structs.Msg) error {
 		case reflect.Slice:
 			s := reflect.ValueOf(record.Subs)
 			for i := 0; i < s.Len(); i++ {
-				if reflect.TypeOf(record.Subs[i]).Kind() == reflect.String {
-					var to string = record.Subs[i].(string)
+				if reflect.TypeOf(record.Subs[i]) == reflect.TypeOf(structs.FromObj{}) { // Records must be in structs.FromObj format
+					var to string = record.Subs[i].From
 					params := &openapi.CreateMessageParams{
 						To: &to,
 						From: &msg.From,
@@ -149,7 +149,7 @@ func PerformSmsDelivery(msg structs.Msg) error {
 				}
 			}
 		default:
-			fmt.Printf("Invalid subs record type, expecting string")
+			fmt.Printf("Invalid subs record type, expecting structs.FromObj")
 	}
 	RemovePhoneNumberFromService(*twilioClient, *service.Sid, *createdNumber.Sid)
 	DeleteService(*twilioClient, *service.Sid)
@@ -172,7 +172,7 @@ func UpdateRedisConverstaion(to string, from string, content string, i int) erro
 	var ctx = context.Background()
 	result, err := rdb.Get(ctx, resolvedKey).Result()
 	if err == redis.Nil {
-		fmt.Printf("Conversation does not exist")
+		// fmt.Printf("Conversation does not exist")
 	} else if err != nil {
 		return fmt.Errorf("Cannot update Redis converstaion for to: %v, from: %v, content: %v, Err: %v", to, from, content, err)
 	} else {

@@ -9,7 +9,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func CheckAuthenticRequest(username string, from string, identifier string, hash string) bool {
+func CheckAuthenticRequest(username string, identifier string, hash string) bool {
 	client := sms_queue.GetConnection()
 	if client != nil {
 		coll := client.Database("mpst").Collection("users")

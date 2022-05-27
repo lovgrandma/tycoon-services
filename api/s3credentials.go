@@ -54,7 +54,8 @@ func returnRawJsonBytes() []byte {
             "dailyadlimitsport": 6383,
             "channelsubscriptionsport": 6384,
             "mpstnumbersport": 6385,
-            "tycoon_systems_queue_port": 6386
+            "tycoon_systems_queue_port": 6386,
+            "tycoon_systems_video_queue_port": 6387
         },
         "twilio": {
             "sid": "ACdebcfdac964631e37cfb607dfb5204b2",

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package video;
+
+option go_package = "tycoon.systems/tycoon-services;tycoon_services";
+
+/* Methods that must be consumed by Node.js must start with lowercase.
+Methods that must be consumed by Go must start with uppercase. */
+
+service videoManagement {
+    rpc CreateNewVideoUpload (NewVideo) returns (Video) {}
+    rpc returnVideoJobResult (Video) returns (Video) {}
+}
+
+message NewVideo {
+    string      Identifier = 1;
+    string      Username = 2;
+    string      Socket = 3;
+    string      Destination = 4;
+    string      Filename = 5;
+    string      Path = 6;
+    string      Uuid = 7;
+    string      Hash = 8;
+}
+
+message Video {
+    string      ID = 1;
+    string      Status = 2;
+    string      Socket = 3;
+    string      Destination = 4;
+    string      Filename = 5;
+    string      Path = 6;
+}
