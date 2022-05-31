@@ -105,7 +105,7 @@ func PerformSmsDelivery(msg structs.Msg) error {
 	if client == nil {
 		return fmt.Errorf("Database client connection unavailable %v", err)
 	}
-	coll := client.Database("mpst").Collection("numbers")
+	coll := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("numbers")
 	record := &structs.Number{}
 	err := coll.FindOne(context.TODO(), bson.D{{"number", msg.From}}).Decode(&record) // Get from phone number data
 	if err != nil {

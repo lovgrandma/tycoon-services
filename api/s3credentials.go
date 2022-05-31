@@ -24,7 +24,11 @@ func returnRawJsonBytes() []byte {
             "region": "us-east-2",
             "snsTopicArnId": "arn:aws:sns:us-east-2:546584803456:AmazonRekognition",
             "roleArnId": "arn:aws:iam::546584803456:user/rekognitionUserAccess",
-            "sqsQueue": "https://sqs.us-east-2.amazonaws.com/546584803456/AmazonRekognition"
+            "sqsQueue": "https://sqs.us-east-2.amazonaws.com/546584803456/AmazonRekognition",
+            "buckets": [
+                "tycoon-systems-video1"
+            ],
+            "MediaBucketLocation1": "us-east-1"
         },
         "cloudFrontKeysPath": {
             "public": "./routes/api/keys/rsa-APKAJ6JGAKCNOGWOEZTA.pem",
@@ -43,7 +47,8 @@ func returnRawJsonBytes() []byte {
             "p": "123abc000zzz",
             "authDb": "admin",
             "address": "mongodb://0.0.0.0:27017/mpst",
-            "addressAuth": "mongodb://miniup:123abc000zzz@0.0.0.0:27017/admin"
+            "addressAuth": "mongodb://miniup:123abc000zzz@0.0.0.0:27017/admin",
+            "db": "mpst"
         },
         "redis": {
             "redishost": "127.0.0.1",
@@ -116,7 +121,6 @@ func runSwitch(key string, nested string, nested2 string, m map[string]interface
     for a, b := range m {
         switch bb := b.(type) {
         case string:
-            // fmt.Println("String", a, bb, i, parent)
             if i == 0 && a == key {
                 return bb
             } else if (i == 1 && a == nested && parent == key) {
@@ -143,6 +147,19 @@ func runSwitch(key string, nested string, nested2 string, m map[string]interface
                 return strconv.FormatFloat(bb, 'f', 0, 64)
             }
         case []interface{}: // If type array
+            if i == 0 && a == key {
+                for i = 0; i < len(bb); i++ {
+                    if bb[i] == key {
+                        return nested
+                    }
+                }
+            } else if (i == 1 && a == nested && parent == key) {
+                for i = 0; i < len(bb); i++ {
+                    if bb[i] == nested2 {
+                        return nested2
+                    }
+                }
+            }
             continue
         case interface{}:
             // fmt.Println("Interface", a, bb, a, i)

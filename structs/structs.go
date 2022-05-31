@@ -54,13 +54,14 @@ type ChatLog struct {
 /* Video */
 
 type Video struct {
-	ID				string
+	ID				string `bson:"_id" json:"id,omitempty"`
 	Author			string
 	Status			string
-	Publish			string
+	Publish			int
+	Creation		int
 	Mpd				string
 	Hls				string
-	Media			[]interface{}
+	Media			[]MediaItem
 	Title			string
 	Description		string
 	Tags			[]interface{}
@@ -68,4 +69,9 @@ type Video struct {
 	Cast			[]interface{}
 	Directors		[]interface{}
 	Writers			[]interface{}
+}
+
+type MediaItem struct {
+	Type			string
+	Url				string
 }

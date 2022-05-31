@@ -6,7 +6,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"context"
-	// "tycoon.systems/tycoon-services/structs"
+	"tycoon.systems/tycoon-services/structs"
 	"github.com/hibiken/asynq"
 	"reflect"
 	"encoding/json"
@@ -14,9 +14,10 @@ import (
 	// "strings"
 	"log"
 	// "github.com/go-redis/redis/v8"
-	// "time"
+	"time"
 	
 	vpb "tycoon.systems/tycoon-services/video"
+	"tycoon.systems/tycoon-services/video/video_queue/transcode"
 	// "google.golang.org/grpc"
 	// "os"
 )
@@ -93,7 +94,22 @@ func HandleVideoProcessTask(ctx context.Context, t *asynq.Task) error {
 }
 
 func PerformVideoProcess(vid *vpb.Video) error {
-	fmt.Printf("Yup %v", vid.GetID())
+	transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "processing") // Build initial record for tracking during processing
+	var mediaItems []structs.MediaItem
+	configResolutions := make([]int, 0)
+	configResolutions = append(configResolutions, 2048, 1440, 720, 540, 360, 240) // Default resolutions to transcode
+	var transcodedMedia []structs.MediaItem = transcode.TranscodeAudioProcess(vid, mediaItems) // Transcode main audio included in video file
+	transcodedMedia = transcode.TranscodeVideoProcess(vid, transcodedMedia, configResolutions, 0) // Transcode video files
+	var liveMediaItems []structs.MediaItem
+	liveMediaItems, _ = transcode.PackageManifest(vid, transcodedMedia, true) // Package manifest files
+	doc, _ := transcode.UpdateMongoRecord(vid, liveMediaItems, "check") // Update record
+	err := transcode.UploadToServers(liveMediaItems, vid.GetDestination(), "video/") // Send to Streaming servers
+	if err != nil {
+		fmt.Printf("issue with uploading to S3 %v", err)
+	}
+	time.Sleep(5 * time.Second)
+	transcode.DeleteMediaItemFiles(liveMediaItems, vid.GetDestination())
+	fmt.Printf("Transcoded Media %v LiveItems %v Doc %v", transcodedMedia, liveMediaItems, doc)
 	return nil
 }
 
