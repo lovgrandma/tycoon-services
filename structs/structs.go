@@ -62,6 +62,8 @@ type Video struct {
 	Mpd				string
 	Hls				string
 	Media			[]MediaItem
+	Thumbnail		string
+	Thumbtrack		[]Thumbnail
 	Title			string
 	Description		string
 	Tags			[]interface{}
@@ -73,5 +75,10 @@ type Video struct {
 
 type MediaItem struct {
 	Type			string
+	Url				string
+}
+
+type Thumbnail struct {
+	Time			string
 	Url				string
 }

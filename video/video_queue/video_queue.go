@@ -94,22 +94,36 @@ func HandleVideoProcessTask(ctx context.Context, t *asynq.Task) error {
 }
 
 func PerformVideoProcess(vid *vpb.Video) error {
-	transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "processing") // Build initial record for tracking during processing
 	var mediaItems []structs.MediaItem
 	configResolutions := make([]int, 0)
 	configResolutions = append(configResolutions, 2048, 1440, 720, 540, 360, 240) // Default resolutions to transcode
 	var transcodedMedia []structs.MediaItem = transcode.TranscodeAudioProcess(vid, mediaItems) // Transcode main audio included in video file
 	transcodedMedia = transcode.TranscodeVideoProcess(vid, transcodedMedia, configResolutions, 0) // Transcode video files
+	var thumbtrack []structs.Thumbnail
+	var thumbDir string
+	thumbtrack, thumbDir = transcode.GenerateThumbnailTrack(vid, thumbtrack)
 	var liveMediaItems []structs.MediaItem
 	liveMediaItems, _ = transcode.PackageManifest(vid, transcodedMedia, true) // Package manifest files
-	doc, _ := transcode.UpdateMongoRecord(vid, liveMediaItems, "check") // Update record
-	err := transcode.UploadToServers(liveMediaItems, vid.GetDestination(), "video/") // Send to Streaming servers
+	liveMediaItems = transcode.FindDefaultThumbnail(thumbtrack, liveMediaItems)
+	doc, _ := transcode.UpdateMongoRecord(vid, liveMediaItems, "check", thumbtrack) // Update record
+	err := transcode.UploadToServers(liveMediaItems, vid.GetDestination(), "video/", thumbDir) // Send to Streaming servers
 	if err != nil {
 		fmt.Printf("issue with uploading to S3 %v", err)
 	}
-	time.Sleep(5 * time.Second)
-	transcode.DeleteMediaItemFiles(liveMediaItems, vid.GetDestination())
-	fmt.Printf("Transcoded Media %v LiveItems %v Doc %v", transcodedMedia, liveMediaItems, doc)
+	err = transcode.UploadThumbtrackToServers(thumbtrack, thumbDir, "thumbtrack/") // Send thumbtrack files to streaming servers
+	if err != nil {
+		fmt.Printf("issue with uploading to S3 %v", err)
+	}
+	liveMediaItems, err = transcode.CleanUpStrayData(liveMediaItems)
+	if err != nil {
+		fmt.Printf("Issue with clean up %v", err)
+	}
+	time.Sleep(2 * time.Second)
+	transcode.DeleteMediaItemFiles(liveMediaItems, vid.GetDestination()) // Delete media files
+	transcode.DeleteThumbnails(thumbtrack, thumbDir)
+	transcode.DeleteFolder(vid.GetDestination() + vid.GetID() + "-thumbs")
+	transcode.ScheduleProfanityCheck(vid)
+	fmt.Printf("Transcoded Media %v\nLiveItems %v\nDoc %v\nThumbtrack %v\nJob Finished\n", transcodedMedia, liveMediaItems, doc, thumbtrack)
 	return nil
 }
 

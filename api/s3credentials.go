@@ -28,7 +28,7 @@ func returnRawJsonBytes() []byte {
             "buckets": [
                 "tycoon-systems-video1"
             ],
-            "MediaBucketLocation1": "us-east-1"
+            "mediaBucketLocation1": "us-east-1"
         },
         "cloudFrontKeysPath": {
             "public": "./routes/api/keys/rsa-APKAJ6JGAKCNOGWOEZTA.pem",

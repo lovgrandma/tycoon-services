@@ -23,6 +23,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"io/ioutil"
+	"io/fs"
 )
 
 var (
@@ -62,11 +64,33 @@ func TranscodeAudioProcess(vid *vpb.Video, media []structs.MediaItem) []structs.
 }
 
 func TranscodeSingleAudio(vid *vpb.Video, media structs.MediaItem, version string) structs.MediaItem {
-	err := ffmpeg.Input(vid.GetPath()).
+	data, err := ffmpeg.Probe(vid.GetPath())
+	if err != nil {
+		fmt.Printf("Issue with probing video for audio data")
+	}
+	unstructuredData := make(map[string]interface{})
+	channels := "2"
+	json.Unmarshal([]byte(data), &unstructuredData)
+	fmt.Printf("Unstructured Data %v", &unstructuredData)
+	if _, ok := unstructuredData["streams"]; ok {
+		if _, ok2 := unstructuredData["streams"].([]interface{}); ok2 {
+			if _, ok3 := unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["channels"]; ok3 {
+				if _, ok4 := unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["channels"].(string); ok4 {
+					channels = unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["channels"].(string)
+				} else {
+					channels = "6"
+				}
+			} else {
+				channels = "6"
+			}
+		}
+	}
+	err = ffmpeg.Input(vid.GetPath()).
 		Output(vid.GetDestination() + vid.GetID() + "-" + version + "-raw.mp4", ffmpeg.KwArgs{
-			"c:a": "aac",
+			"vn": "", // Video none
+			"c:a": "aac", // Convert all audio to aac
 			"b:a": "256k",
-			"vn": "",
+			"ac": channels,
 		}).
 		ErrorToStdOut().
 		Run()
@@ -88,11 +112,12 @@ func TranscodeSingleVideo(vid *vpb.Video, media structs.MediaItem, resolution in
 		Output(vid.GetDestination() + vid.GetID() + "-" + curRes + "-raw.mp4", ffmpeg.KwArgs{
 			"vf": "scale=" + "-2:" + curRes,
 			"c:v": "libx264",
-			"preset": "faster",
 			"crf": "24",
-			"x264-params": "keyint=24:min-keyint=24:no-scenecut",
 			"tune": "film",
-			"bufsize": "64k",
+			"x264-params": "keyint=24:min-keyint=24:no-scenecut",
+			"profile:v": "baseline",
+			"level": "3.0",
+			"pix_fmt": "yuv420p",
 		}).
 		ErrorToStdOut().
 		Run()
@@ -164,7 +189,7 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 	argsSlice = append(argsSlice, expectedMpdPath)
 	argsSlice = append(argsSlice, "--hls_master_playlist_output")
 	argsSlice = append(argsSlice, expectedHlsPath)
-	fmt.Printf("%v %v", app, argsSlice)
+	// fmt.Printf("%v %v", app, argsSlice) // Packager command
 	cmd := exec.Command(app, argsSlice...)
 	cmd.Dir = vid.GetDestination()
 	strderr, _ := cmd.StderrPipe()
@@ -181,7 +206,7 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 	return liveMediaItems, media; // liveData, old (deleted if del true)
 }
 
-func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string) (any, error) {
+func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string, thumbtrack []structs.Thumbnail) (any, error) {
 	if client == nil {
 		return nil, fmt.Errorf("Database client connection unavailable %v", err)
 	}
@@ -198,6 +223,8 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string)
 			Mpd:		"",
 			Hls:		"",
 			Media:		media,
+			Thumbnail:	"",
+			Thumbtrack:	[]structs.Thumbnail{},
 			Title:		"",
 			Description:"",
 			Tags:		make([]interface{}, 0),
@@ -212,6 +239,11 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string)
 		}
 		return insertedDocument, nil
 	} else {
+		trimmedMediaData := media
+		m, err := CleanUpStrayData(media)
+		if err == nil {
+			trimmedMediaData = m
+		}
 		document := structs.Video{ // Upsert document
 			ID: 		vid.GetID(),
 			Author:		vid.GetSocket(),
@@ -220,7 +252,9 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string)
 			Creation:	record.Creation,
 			Mpd:		FindMediaOfType(media, "mpd"),
 			Hls:		FindMediaOfType(media, "hls"),
-			Media:		media,
+			Media:		trimmedMediaData,
+			Thumbnail:	FindMediaOfType(media, "thumbnail"),
+			Thumbtrack:	thumbtrack,
 			Title:		record.Title,
 			Description:record.Description,
 			Tags:		record.Tags,
@@ -243,6 +277,21 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string)
 	return nil, nil
 }
 
+func FindDefaultThumbnail(thumbtrack []structs.Thumbnail, media []structs.MediaItem) []structs.MediaItem {
+	if len(thumbtrack) != 0 {
+		for i := 5; i > 0; i-- {
+			if len(thumbtrack) > i {
+				media = append(media, structs.MediaItem{
+					Type: "thumbnail",
+					Url: thumbtrack[i].Url,
+				})
+				break
+			}
+		}
+	}
+	return media
+}
+
 func toDoc(v any) (doc *bson.D, err error) {
 	data, err := bson.Marshal(v)
 	if err != nil {
@@ -253,13 +302,13 @@ func toDoc(v any) (doc *bson.D, err error) {
 	return
 }
 
-func UploadToServers(liveMediaItems []structs.MediaItem, destination string, uploadFolder string) error {
+func UploadToServers(liveMediaItems []structs.MediaItem, destination string, uploadFolder string, thumbDir string) error {
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(s3credentials.GetS3Data("awsConfig", "MediaBucketLocation1", "")),
+		config.WithRegion(s3credentials.GetS3Data("awsConfig", "mediaBucketLocation1", "")),
 		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
 			Value: aws.Credentials{
 				AccessKeyID: s3credentials.GetS3Data("awsConfig", "accessKeyId", ""), 
-				SecretAccessKey: "k5gaxg17n1ftHLIbHDuZBwEFY71xhJyyGnli7439", 
+				SecretAccessKey: s3credentials.GetS3Data("awsConfig", "secretAccessKey", ""),
 			},
 		}),
 	)
@@ -269,19 +318,154 @@ func UploadToServers(liveMediaItems []structs.MediaItem, destination string, upl
 	client := s3.NewFromConfig(cfg)
 	uploader := manager.NewUploader(client)
 	for i := 0; i < len(liveMediaItems); i++ {
-		f, _ := os.Open(destination + liveMediaItems[i].Url)
+		upFrom := destination
+		upTo := uploadFolder
+		if liveMediaItems[i].Type == "thumbnail" {
+			upFrom = thumbDir
+			upTo = "thumbnail/"
+		}
+		f, _ := os.Open(upFrom + liveMediaItems[i].Url)
 		r := bufio.NewReader(f)
+		fmt.Printf("Uploading: %v\n", upFrom + liveMediaItems[i].Url)
 		_, err := uploader.Upload(context.TODO(), &s3.PutObjectInput{
 			Bucket: aws.String(s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-video1")),
-			Key:    aws.String(uploadFolder + liveMediaItems[i].Url),
+			Key:    aws.String(upTo + liveMediaItems[i].Url),
 			Body:   r,
 		})
 		if err != nil {
 			return err
 		}
-		f.Close()
+		f.Close() // Close stream to prevent permissions issue
 	}
 	return nil
+}
+
+func UploadThumbtrackToServers(thumbtrack []structs.Thumbnail, destination string, uploadFolder string) error {
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion(s3credentials.GetS3Data("awsConfig", "mediaBucketLocation1", "")),
+		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
+			Value: aws.Credentials{
+				AccessKeyID: s3credentials.GetS3Data("awsConfig", "accessKeyId", ""), 
+				SecretAccessKey: s3credentials.GetS3Data("awsConfig", "secretAccessKey", ""),
+			},
+		}),
+	)
+	if err != nil {
+		return err
+	}
+	client := s3.NewFromConfig(cfg)
+	uploader := manager.NewUploader(client)
+	for i := 0; i < len(thumbtrack); i++ {
+		f, _ := os.Open(destination + thumbtrack[i].Url)
+		r := bufio.NewReader(f)
+		fmt.Printf("Uploading: %v\n", uploadFolder + thumbtrack[i].Url)
+		_, err := uploader.Upload(context.TODO(), &s3.PutObjectInput{
+			Bucket: aws.String(s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-video1")),
+			Key:    aws.String(uploadFolder + thumbtrack[i].Url),
+			Body:   r,
+		})
+		if err != nil {
+			return err
+		}
+		f.Close() // Close stream to prevent permissions issue
+	}
+	return nil
+}
+
+func CleanUpStrayData(media []structs.MediaItem) ([]structs.MediaItem, error) {
+	for i := len(media) -1; i > 0; i-- {
+		if media[i].Type == "thumbnail" {
+			media = append(media[:i], media[i+1:]...)
+		}
+	}
+	return media, nil
+}
+
+func GenerateThumbnailTrack(vid *vpb.Video, thumbtrack []structs.Thumbnail) ([]structs.Thumbnail, string) {
+	var thumbDir string = vid.GetDestination() + vid.GetID() + "-thumbs"
+	os.MkdirAll(thumbDir, os.ModePerm)
+	err := ffmpeg.Input(vid.GetPath()).
+		Output(thumbDir + "/" + vid.GetID() + "-thumb%03d.jpg", ffmpeg.KwArgs{
+			"vf": "select='not(mod(n,600))',setpts='N/(30*TB)',scale=-2:180",
+			"f": "image2",
+		}).
+		ErrorToStdOut().
+		Run()
+	if err != nil {
+		fmt.Printf("Err %v", err)
+		return []structs.Thumbnail{}, ""
+	}
+	files, err := ioutil.ReadDir(thumbDir)
+	if err != nil {
+		fmt.Printf("Err %v", err)
+		OrganizeAndDeleteThumbnails(thumbtrack, files, vid.GetPath())
+		return []structs.Thumbnail{}, ""
+	}
+	data, err := ffmpeg.Probe(vid.GetPath())
+	if err != nil {
+		OrganizeAndDeleteThumbnails(thumbtrack, files, vid.GetPath())
+		return []structs.Thumbnail{}, ""
+	}
+	unstructuredData := make(map[string]interface{})
+	json.Unmarshal([]byte(data), &unstructuredData)
+	fmt.Printf("Unstructured Data %v", unstructuredData)
+	if _, ok := unstructuredData["streams"]; ok {
+		if _, ok2 := unstructuredData["streams"].([]interface{}); ok2 {
+			if _, ok3 := unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["duration"]; ok3 {
+				duration := unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["duration"].(string)
+				dur, _ := strconv.ParseFloat(duration, 64)
+				var ti float64 = 0
+				for i, file := range files {
+					if ti >= dur || i >= len(files) { // Double check to ensure no panic
+						break
+					}
+					t := structs.Thumbnail{
+						Time: fmt.Sprintf("%.2f", ti),
+						Url: file.Name(),
+					}
+					thumbtrack = append(thumbtrack, t)
+					ti = ti + 20
+				}
+				return thumbtrack, thumbDir + "/"
+			}
+		}
+	}
+	OrganizeAndDeleteThumbnails(thumbtrack, files, vid.GetPath())
+	return []structs.Thumbnail{}, ""
+}
+
+func ScheduleProfanityCheck(vid *vpb.Video) error {
+
+	return nil
+}
+
+func DeleteFolder(dir string) error {
+	err := os.Remove(dir)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func OrganizeAndDeleteThumbnails(thumbtrack []structs.Thumbnail, files []fs.FileInfo, path string) error {
+	if files != nil {
+		for i := 0; i < len(files); i++ {
+			t := structs.Thumbnail{
+				Time: "",
+				Url: files[i].Name(),
+			}
+			thumbtrack = append(thumbtrack, t)
+		}
+		DeleteThumbnails(thumbtrack, path)
+	}
+	return nil
+}
+
+func DeleteThumbnails(stale []structs.Thumbnail, dir string) error {
+	for i := 0; i < len(stale); i++ {
+		DeleteFile(stale[i].Url, dir)
+	}
+	return nil 
 }
 
 func DeleteMediaItemFiles(stale []structs.MediaItem, dir string) error {

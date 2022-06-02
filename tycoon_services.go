@@ -11,6 +11,7 @@ import (
 	"tycoon.systems/tycoon-services/video/video_queue"
 	"tycoon.systems/tycoon-services/structs"
 	"tycoon.systems/tycoon-services/sms/sms_queue/workers"
+	"tycoon.systems/tycoon-services/video/video_queue/transcode"
 	video_workers "tycoon.systems/tycoon-services/video/video_queue/workers"
 	"errors"
 
@@ -69,7 +70,9 @@ func (v *VideoManegmentServer) CreateNewVideoUpload(ctx context.Context, in *vpb
 			if authenticated != false {
 				jobProvisioned := video_queue.ProvisionVideoJob(&vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: in.GetDestination(), Filename: in.GetFilename(), Path: in.GetPath()})
 				if jobProvisioned != "failed" {
-					return &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: jobProvisioned, Destination: "null", Filename: "null", Path: "null"}, nil
+					vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: jobProvisioned, Destination: "null", Filename: "null", Path: "null"}
+					transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "processing", []structs.Thumbnail{}) // Build initial record for tracking during processing
+					return vid, nil
 				}
 			}
 		}
