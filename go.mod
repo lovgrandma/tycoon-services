@@ -11,6 +11,7 @@ require (
 	tycoon.systems/tycoon-services/structs v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/video v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/video/video_queue v0.0.0-00010101000000-000000000000
+	tycoon.systems/tycoon-services/video/video_queue/transcode v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/video/video_queue/workers v0.0.0-00010101000000-000000000000
 )
 
@@ -66,7 +67,6 @@ require (
 	google.golang.org/protobuf v1.28.0 // indirect
 	tycoon.systems/tycoon-services/s3credentials v0.0.0-00010101000000-000000000000 // indirect
 	tycoon.systems/tycoon-services/sms/sms_utility v0.0.0-00010101000000-000000000000 // indirect
-	tycoon.systems/tycoon-services/video/video_queue/transcode v0.0.0-00010101000000-000000000000 // indirect
 )
 
 replace tycoon.systems/tycoon-services/s3credentials => ./api/

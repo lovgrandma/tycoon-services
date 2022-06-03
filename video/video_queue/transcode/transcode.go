@@ -2,12 +2,12 @@ package transcode
 
 import (
 	"tycoon.systems/tycoon-services/s3credentials"
+	"tycoon.systems/tycoon-services/structs"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 	vpb "tycoon.systems/tycoon-services/video"
-	"tycoon.systems/tycoon-services/structs"
 	"fmt"
 	"encoding/json"
 	"strconv"
@@ -71,17 +71,12 @@ func TranscodeSingleAudio(vid *vpb.Video, media structs.MediaItem, version strin
 	unstructuredData := make(map[string]interface{})
 	channels := "2"
 	json.Unmarshal([]byte(data), &unstructuredData)
-	fmt.Printf("Unstructured Data %v", &unstructuredData)
 	if _, ok := unstructuredData["streams"]; ok {
 		if _, ok2 := unstructuredData["streams"].([]interface{}); ok2 {
 			if _, ok3 := unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["channels"]; ok3 {
 				if _, ok4 := unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["channels"].(string); ok4 {
 					channels = unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["channels"].(string)
-				} else {
-					channels = "6"
 				}
-			} else {
-				channels = "6"
 			}
 		}
 	}
@@ -118,6 +113,9 @@ func TranscodeSingleVideo(vid *vpb.Video, media structs.MediaItem, resolution in
 			"profile:v": "baseline",
 			"level": "3.0",
 			"pix_fmt": "yuv420p",
+			"preset": "faster",
+			"movflags": "+faststart",
+			"x264opts": "opencl",
 		}).
 		ErrorToStdOut().
 		Run()
@@ -140,8 +138,16 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 	// reRaw := regexp.MustCompile(`([a-zA-Z0-9].*)-([a-zA-Z0-9].*)-raw(\.[a-zA-Z0-9].*)`) // 15cf28e1a0a048f6a2deecee161e4f8a-720-raw.mp4
 	var liveMediaItems []structs.MediaItem
 	for i := 0; i < len(media); i++ {
-		args := ""
-		if media[i].Url != "bad" {
+		if media[i].Type == "text" && media[i].Url != "bad" {
+			// Do not add subtitle references to manifest for now using shaka packager. Functionality can be done manually using a script to run after completion of this process. For now client side will
+			// manually grab vtt files from media property stored on record signified by operation bellow
+			liveMediaItems = append(liveMediaItems, structs.MediaItem{
+				Type: "text",
+				Url: media[i].Url,
+			})
+			media[i].Url = "" // Ignore file deletion here since we are not creating new files from "raw" files for vtt.
+		} else if media[i].Url != "bad" {
+			args := ""
 			matchPath := re.FindAllStringSubmatch(media[i].Url, -1)
 			// matchPath2 := reRaw.FindAllStringSubmatch(media[i].Url, -1)
 			p := matchPath[0][1] + matchPath[0][2]
@@ -172,8 +178,8 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 					Url: p3,
 				})
 			}
+			argsSlice = append(argsSlice, args)
 		}
-		argsSlice = append(argsSlice, args)
 	}
 	var expectedMpdPath string = vid.GetID() + "-mpd.mpd"
 	liveMediaItems = append(liveMediaItems, structs.MediaItem{
@@ -189,7 +195,7 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 	argsSlice = append(argsSlice, expectedMpdPath)
 	argsSlice = append(argsSlice, "--hls_master_playlist_output")
 	argsSlice = append(argsSlice, expectedHlsPath)
-	// fmt.Printf("%v %v", app, argsSlice) // Packager command
+	fmt.Printf("Shaka Command: %v %v", app, argsSlice)
 	cmd := exec.Command(app, argsSlice...)
 	cmd.Dir = vid.GetDestination()
 	strderr, _ := cmd.StderrPipe()
@@ -214,6 +220,7 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 	record := &structs.Video{}
 	err := videos.FindOne(context.TODO(), bson.D{{"_id", vid.GetID()}}).Decode(&record) // Get from phone number data
 	if err == mongo.ErrNoDocuments {
+		defaultTitle, defaultDescription := ProbeDefaultMetadata(vid)
 		document := structs.Video{
 			ID: 		vid.GetID(),
 			Author:		vid.GetSocket(),
@@ -225,8 +232,8 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 			Media:		media,
 			Thumbnail:	"",
 			Thumbtrack:	[]structs.Thumbnail{},
-			Title:		"",
-			Description:"",
+			Title:		defaultTitle,
+			Description:defaultDescription,
 			Tags:		make([]interface{}, 0),
 			Production: "",
 			Cast:		make([]interface{}, 0),
@@ -277,6 +284,32 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 	return nil, nil
 }
 
+func ProbeDefaultMetadata(vid *vpb.Video) (string, string) {
+	var title string = ""
+	var description string = ""
+	data, err := ffmpeg.Probe(vid.GetPath())
+	if err != nil {
+		return title, description
+	}
+	unstructuredData := make(map[string]interface{})
+	json.Unmarshal([]byte(data), &unstructuredData)
+	if _, ok := unstructuredData["format"]; ok {
+		if _, ok2 :=  unstructuredData["format"].(map[string]interface{})["tags"]; ok2 {
+			if _, ok3 := unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["description"]; ok3 {
+				if _, ok4 := unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["description"].(string); ok4 {
+					description = unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["description"].(string)
+				}
+			}
+			if _, ok5 := unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["title"]; ok5 {
+				if _, ok6 := unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["title"].(string); ok6 {
+					title = unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["title"].(string)
+				}
+			}
+		}
+	}
+	return title, description
+}
+
 func FindDefaultThumbnail(thumbtrack []structs.Thumbnail, media []structs.MediaItem) []structs.MediaItem {
 	if len(thumbtrack) != 0 {
 		for i := 5; i > 0; i-- {
@@ -323,10 +356,12 @@ func UploadToServers(liveMediaItems []structs.MediaItem, destination string, upl
 		if liveMediaItems[i].Type == "thumbnail" {
 			upFrom = thumbDir
 			upTo = "thumbnail/"
+		} else if liveMediaItems[i].Type == "text" {
+			upTo = "text/"
 		}
 		f, _ := os.Open(upFrom + liveMediaItems[i].Url)
 		r := bufio.NewReader(f)
-		fmt.Printf("Uploading: %v\n", upFrom + liveMediaItems[i].Url)
+		fmt.Printf("Uploading: %v %v\n", upFrom + liveMediaItems[i].Url, upTo + liveMediaItems[i].Url)
 		_, err := uploader.Upload(context.TODO(), &s3.PutObjectInput{
 			Bucket: aws.String(s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-video1")),
 			Key:    aws.String(upTo + liveMediaItems[i].Url),
@@ -392,45 +427,41 @@ func GenerateThumbnailTrack(vid *vpb.Video, thumbtrack []structs.Thumbnail) ([]s
 		ErrorToStdOut().
 		Run()
 	if err != nil {
-		fmt.Printf("Err %v", err)
+		fmt.Printf("Err Generating thumbnail track - GENERATE: %v", err)
 		return []structs.Thumbnail{}, ""
 	}
 	files, err := ioutil.ReadDir(thumbDir)
 	if err != nil {
-		fmt.Printf("Err %v", err)
-		OrganizeAndDeleteThumbnails(thumbtrack, files, vid.GetPath())
+		fmt.Printf("Err Generating thumbnail track - READ DIR: %v", err)
+		OrganizeAndDeleteThumbnails(thumbtrack, files, thumbDir)
 		return []structs.Thumbnail{}, ""
 	}
 	data, err := ffmpeg.Probe(vid.GetPath())
 	if err != nil {
-		OrganizeAndDeleteThumbnails(thumbtrack, files, vid.GetPath())
+		fmt.Printf("Err Generating thumbnail track - PROBE: %v", err)
+		OrganizeAndDeleteThumbnails(thumbtrack, files, thumbDir)
 		return []structs.Thumbnail{}, ""
 	}
 	unstructuredData := make(map[string]interface{})
 	json.Unmarshal([]byte(data), &unstructuredData)
-	fmt.Printf("Unstructured Data %v", unstructuredData)
-	if _, ok := unstructuredData["streams"]; ok {
-		if _, ok2 := unstructuredData["streams"].([]interface{}); ok2 {
-			if _, ok3 := unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["duration"]; ok3 {
-				duration := unstructuredData["streams"].([]interface{})[0].(map[string]interface{})["duration"].(string)
-				dur, _ := strconv.ParseFloat(duration, 64)
-				var ti float64 = 0
-				for i, file := range files {
-					if ti >= dur || i >= len(files) { // Double check to ensure no panic
-						break
-					}
-					t := structs.Thumbnail{
-						Time: fmt.Sprintf("%.2f", ti),
-						Url: file.Name(),
-					}
-					thumbtrack = append(thumbtrack, t)
-					ti = ti + 20
-				}
-				return thumbtrack, thumbDir + "/"
+	fmt.Printf("Streaming %v", unstructuredData)
+	if len(files) > 0 {
+		var ti float64 = 0 
+		for i, file := range files {
+			if i >= len(files) { // Double check to ensure no panic
+				break
 			}
+			t := structs.Thumbnail{
+				Time: fmt.Sprintf("%.2f", ti),
+				Url: file.Name(),
+			}
+			thumbtrack = append(thumbtrack, t)
+			ti = ti + 20
 		}
+		return thumbtrack, thumbDir + "/"
 	}
-	OrganizeAndDeleteThumbnails(thumbtrack, files, vid.GetPath())
+	fmt.Printf("No thumbnail files generated")
+	OrganizeAndDeleteThumbnails(thumbtrack, files, thumbDir)
 	return []structs.Thumbnail{}, ""
 }
 
@@ -470,7 +501,9 @@ func DeleteThumbnails(stale []structs.Thumbnail, dir string) error {
 
 func DeleteMediaItemFiles(stale []structs.MediaItem, dir string) error {
 	for i := 0; i < len(stale); i++ {
-		DeleteFile(stale[i].Url, dir)
+		if len(stale[i].Url) > 0 {
+			DeleteFile(stale[i].Url, dir)
+		}
 	}
 	return nil
 }
@@ -517,4 +550,30 @@ func FindMediaOfType(media []structs.MediaItem, t string) string {
 		}
 	}
 	return ""
+}
+
+func FindClosedCaptions(vid *vpb.Video, media []structs.MediaItem) []structs.MediaItem {
+	data, err := ffmpeg.Probe(vid.GetPath())
+	if err != nil {
+		return media
+	}
+	unstructuredData := make(map[string]interface{})
+	json.Unmarshal([]byte(data), &unstructuredData)
+	fmt.Printf("Data before Find Closed Captions %v", unstructuredData)
+	for i := 0; i < 3; i++ {
+		out := vid.GetDestination() + vid.GetID() + "-" + strconv.Itoa(i) + "-subtitle" + ".vtt"
+		err := ffmpeg.Input(vid.GetPath()).
+			Output(out, ffmpeg.KwArgs{
+				"map": "0:s:" + strconv.Itoa(i),
+			}).
+			ErrorToStdOut().
+			Run()
+		if err == nil {
+			media = append(media, structs.MediaItem{
+				Type: "text",
+				Url: vid.GetID() + "-" + strconv.Itoa(i) + "-subtitle" + ".vtt",
+			})
+		}
+	}
+	return media
 }

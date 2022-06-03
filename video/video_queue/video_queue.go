@@ -94,11 +94,12 @@ func HandleVideoProcessTask(ctx context.Context, t *asynq.Task) error {
 }
 
 func PerformVideoProcess(vid *vpb.Video) error {
-	var mediaItems []structs.MediaItem
 	configResolutions := make([]int, 0)
 	configResolutions = append(configResolutions, 2048, 1440, 720, 540, 360, 240) // Default resolutions to transcode
-	var transcodedMedia []structs.MediaItem = transcode.TranscodeAudioProcess(vid, mediaItems) // Transcode main audio included in video file
+	var transcodedMedia []structs.MediaItem = transcode.TranscodeAudioProcess(vid, []structs.MediaItem{}) // Transcode main audio included in video file
 	transcodedMedia = transcode.TranscodeVideoProcess(vid, transcodedMedia, configResolutions, 0) // Transcode video files
+	transcodedMedia = transcode.FindClosedCaptions(vid, transcodedMedia) // Retrieve closed captions
+	fmt.Printf("Transcoded Media so far: %v", transcodedMedia)
 	var thumbtrack []structs.Thumbnail
 	var thumbDir string
 	thumbtrack, thumbDir = transcode.GenerateThumbnailTrack(vid, thumbtrack)

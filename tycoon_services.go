@@ -70,7 +70,7 @@ func (v *VideoManegmentServer) CreateNewVideoUpload(ctx context.Context, in *vpb
 			if authenticated != false {
 				jobProvisioned := video_queue.ProvisionVideoJob(&vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: in.GetDestination(), Filename: in.GetFilename(), Path: in.GetPath()})
 				if jobProvisioned != "failed" {
-					vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: jobProvisioned, Destination: "null", Filename: "null", Path: "null"}
+					vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: jobProvisioned, Destination: "null", Filename: "null", Path: in.GetPath()}
 					transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "processing", []structs.Thumbnail{}) // Build initial record for tracking during processing
 					return vid, nil
 				}
