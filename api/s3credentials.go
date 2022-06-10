@@ -16,19 +16,24 @@ func returnRawJsonBytes() []byte {
         "app": {
             "port": 5300,
             "server": "3.22.158.110",
-            "prodhost": "127.0.0.1"
+            "prodhost": "127.0.0.1",
+            "dev": "true"
         },
         "awsConfig": {
             "accessKeyId": "AKIAIPCMZT3QFEP2YAXQ",
             "secretAccessKey": "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",
             "region": "us-east-2",
-            "snsTopicArnId": "arn:aws:sns:us-east-2:546584803456:AmazonRekognition",
-            "roleArnId": "arn:aws:iam::546584803456:user/rekognitionUserAccess",
-            "sqsQueue": "https://sqs.us-east-2.amazonaws.com/546584803456/AmazonRekognition",
+            "rekognitionSnsTopicArnId": "arn:aws:sns:us-east-2:546584803456:TycoonProfanityCheck",
+            "rekognitionRoleArnId": "arn:aws:iam::546584803456:role/SimpleRekognitionService",
+            "rekognitionSqsQueue": "https://sqs.us-east-2.amazonaws.com/546584803456/TycoonProfanityCheck",
+            "rekognitionSqsQueueArn": "arn:aws:sqs:us-east-2:546584803456:TycoonProfanityCheck",
             "buckets": [
-                "tycoon-systems-video1"
+                "tycoon-systems-video"
             ],
-            "mediaBucketLocation1": "us-east-1"
+            "devBuckets": [
+                "tycoon-systems-video-development"
+            ],
+            "mediaBucketLocation1": "us-east-2"
         },
         "cloudFrontKeysPath": {
             "public": "./routes/api/keys/rsa-APKAJ6JGAKCNOGWOEZTA.pem",

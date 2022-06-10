@@ -10,7 +10,7 @@ import (
 	"tycoon.systems/tycoon-services/sms/sms_queue"
 	"tycoon.systems/tycoon-services/video/video_queue"
 	"tycoon.systems/tycoon-services/structs"
-	"tycoon.systems/tycoon-services/sms/sms_queue/workers"
+	sms_workers "tycoon.systems/tycoon-services/sms/sms_queue/workers"
 	"tycoon.systems/tycoon-services/video/video_queue/transcode"
 	video_workers "tycoon.systems/tycoon-services/video/video_queue/workers"
 	"errors"
@@ -68,10 +68,10 @@ func (v *VideoManegmentServer) CreateNewVideoUpload(ctx context.Context, in *vpb
 			// log.Printf("Received Video: %v, %v, %v, %v, %v, %v, %v, %v", in.GetIdentifier(), in.GetUsername(), in.GetSocket(), in.GetDestination(), in.GetFilename(), in.GetPath(), in.GetUuid(), in.GetHash())
 			var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash()) // Access mongo and check user identifier against hash to determine if request should be honoured
 			if authenticated != false {
+				vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: "null", Filename: "null", Path: in.GetPath()}
+				transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "waiting", []structs.Thumbnail{}, true) // Build initial record for tracking during processing
 				jobProvisioned := video_queue.ProvisionVideoJob(&vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: in.GetDestination(), Filename: in.GetFilename(), Path: in.GetPath()})
 				if jobProvisioned != "failed" {
-					vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: jobProvisioned, Destination: "null", Filename: "null", Path: in.GetPath()}
-					transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "processing", []structs.Thumbnail{}) // Build initial record for tracking during processing
 					return vid, nil
 				}
 			}
@@ -89,7 +89,7 @@ func main() {
 	s := grpc.NewServer()
 	pb.RegisterSmsManagementServer(s, &SmsManagementServer{})
 	go newVideoServer() // Server for ingesting video job requests
-	go workers.BuildWorkerServer() // Server for SMS job queue
+	go sms_workers.BuildWorkerServer() // Server for SMS job queue
 	go video_workers.BuildWorkerServer() // Server for video job queue
 	log.Printf("Server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {

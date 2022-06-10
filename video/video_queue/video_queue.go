@@ -18,8 +18,8 @@ import (
 	
 	vpb "tycoon.systems/tycoon-services/video"
 	"tycoon.systems/tycoon-services/video/video_queue/transcode"
-	// "google.golang.org/grpc"
-	// "os"
+	"google.golang.org/grpc"
+	"os"
 )
 
 var (
@@ -34,7 +34,7 @@ var (
 	client, err = mongo.Connect(context.TODO(), clientOpts)
 	jobQueueAddr = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_video_queue_port", "")
 	jobClient = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
-	returnJobResultPort = "6002"
+	returnJobResultPort = "6003"
 	returnJobResultAddr = s3credentials.GetS3Data("app", "prodhost", "")
 )
 
@@ -57,7 +57,7 @@ func ProvisionVideoJob(vid *vpb.Video) string {
 		if err != nil {
 			log.Printf("Could not create Video Process task at Task Creation: %v", err)
 		}
-		info, err := jobClient.Enqueue(task)
+		info, err := jobClient.Enqueue(task, asynq.Timeout(5 * time.Hour))
 		if err != nil {
 			log.Printf("Could not create Video Process task at Enqueue: %v", err)
 		}
@@ -94,38 +94,69 @@ func HandleVideoProcessTask(ctx context.Context, t *asynq.Task) error {
 }
 
 func PerformVideoProcess(vid *vpb.Video) error {
-	configResolutions := make([]int, 0)
-	configResolutions = append(configResolutions, 2048, 1440, 720, 540, 360, 240) // Default resolutions to transcode
-	var transcodedMedia []structs.MediaItem = transcode.TranscodeAudioProcess(vid, []structs.MediaItem{}) // Transcode main audio included in video file
-	transcodedMedia = transcode.TranscodeVideoProcess(vid, transcodedMedia, configResolutions, 0) // Transcode video files
-	transcodedMedia = transcode.FindClosedCaptions(vid, transcodedMedia) // Retrieve closed captions
-	fmt.Printf("Transcoded Media so far: %v", transcodedMedia)
+	var alreadyRunning bool = transcode.CheckAndUpdateRecord(vid, "processing") // Build initial record for tracking during processing
+	if alreadyRunning {
+		return nil
+	}
+	var transcodedMedia []structs.MediaItem = transcode.TranscodeAudioProcess(vid, []structs.MediaItem{}) // Transcode Main Audio included in Video File -> Transcode Video Files -> Transcode Subtitles
+	fmt.Printf("Transcoded Media so far: %v\n", transcodedMedia)
 	var thumbtrack []structs.Thumbnail
 	var thumbDir string
 	thumbtrack, thumbDir = transcode.GenerateThumbnailTrack(vid, thumbtrack)
 	var liveMediaItems []structs.MediaItem
 	liveMediaItems, _ = transcode.PackageManifest(vid, transcodedMedia, true) // Package manifest files
 	liveMediaItems = transcode.FindDefaultThumbnail(thumbtrack, liveMediaItems)
-	doc, _ := transcode.UpdateMongoRecord(vid, liveMediaItems, "check", thumbtrack) // Update record
+	doc, _ := transcode.UpdateMongoRecord(vid, liveMediaItems, "check", thumbtrack, false) // Update record
 	err := transcode.UploadToServers(liveMediaItems, vid.GetDestination(), "video/", thumbDir) // Send to Streaming servers
 	if err != nil {
-		fmt.Printf("issue with uploading to S3 %v", err)
+		fmt.Printf("issue with uploading to S3 %v\n", err)
 	}
 	err = transcode.UploadThumbtrackToServers(thumbtrack, thumbDir, "thumbtrack/") // Send thumbtrack files to streaming servers
 	if err != nil {
-		fmt.Printf("issue with uploading to S3 %v", err)
+		fmt.Printf("issue with uploading to S3 %v\n", err)
 	}
 	liveMediaItems, err = transcode.CleanUpStrayData(liveMediaItems)
 	if err != nil {
-		fmt.Printf("Issue with clean up %v", err)
+		fmt.Printf("Issue with clean up %v\n", err)
 	}
 	time.Sleep(2 * time.Second)
 	transcode.DeleteMediaItemFiles(liveMediaItems, vid.GetDestination()) // Delete media files
 	transcode.DeleteThumbnails(thumbtrack, thumbDir)
 	transcode.DeleteFolder(vid.GetDestination() + vid.GetID() + "-thumbs")
-	transcode.ScheduleProfanityCheck(vid)
+	var finalRecord structs.Video
+	finalRecord, err = transcode.ScheduleProfanityCheck(vid, liveMediaItems)
+	if err != nil {
+		fmt.Printf("Error scheduling profanity check %v\n", err)
+		return nil
+	}
+	returnFinishedJobReport(finalRecord)
 	fmt.Printf("Transcoded Media %v\nLiveItems %v\nDoc %v\nThumbtrack %v\nJob Finished\n", transcodedMedia, liveMediaItems, doc, thumbtrack)
 	return nil
+}
+
+func returnFinishedJobReport(vid structs.Video) {
+	useReturnJobResultAddr := returnJobResultAddr
+	if os.Getenv("dev") == "true" {
+		useReturnJobResultAddr = "localhost"
+	}
+	conn, err := grpc.Dial(useReturnJobResultAddr + ":" + returnJobResultPort, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		fmt.Printf("Err: %v", err)
+	}
+	if err == nil {
+		defer conn.Close()
+		c := vpb.NewVideoManagementClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		c.ReturnVideoJobResult(ctx, &vpb.Video{
+			ID: vid.ID, 
+			Status: vid.Status,
+			Socket: vid.Author,
+			Destination: "",
+			Filename: "",
+			Path: "",
+		})
+	}
 }
 
 func resolveBadJob(id string, filename string) {
