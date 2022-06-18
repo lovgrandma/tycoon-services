@@ -1,52 +1,53 @@
 package transcode
 
 import (
-	"tycoon.systems/tycoon-services/s3credentials"
-	"tycoon.systems/tycoon-services/structs"
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"io/ioutil"
+	"os"
+	"os/exec"
+	"regexp"
+	"strconv"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/rekognition"
+	rekognitionTypes "github.com/aws/aws-sdk-go-v2/service/rekognition/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go/middleware"
+	ffmpeg "github.com/u2takey/ffmpeg-go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	ffmpeg "github.com/u2takey/ffmpeg-go"
+	"tycoon.systems/tycoon-services/s3credentials"
+	"tycoon.systems/tycoon-services/structs"
 	vpb "tycoon.systems/tycoon-services/video"
-	"fmt"
-	"encoding/json"
-	"strconv"
-	"os/exec"
-	"os"
-	"io"
-	"bufio"
-	"regexp"
-	"context"
-	"time"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/rekognition"
-	rekognitionTypes "github.com/aws/aws-sdk-go-v2/service/rekognition/types"
-	"github.com/aws/smithy-go/middleware"
-	"io/ioutil"
-	"io/fs"
-	"errors"
 )
 
 var (
-	uri = s3credentials.GetS3Data("mongo", "addressAuth", "")
+	uri        = s3credentials.GetS3Data("mongo", "addressAuth", "")
 	credential = options.Credential{
 		AuthSource: "admin",
-		Username: s3credentials.GetS3Data("mongo", "u", ""),
-		Password: s3credentials.GetS3Data("mongo", "p", ""),
+		Username:   s3credentials.GetS3Data("mongo", "u", ""),
+		Password:   s3credentials.GetS3Data("mongo", "p", ""),
 	}
 	clientOpts = options.Client().ApplyURI(uri).
-		SetAuth(credential)
-	client, err = mongo.Connect(context.TODO(), clientOpts)
+			SetAuth(credential)
+	client, err     = mongo.Connect(context.TODO(), clientOpts)
 	s3VideoEndpoint = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-video")
-	devEnv = s3credentials.GetS3Data("app", "dev", "")
+	devEnv          = s3credentials.GetS3Data("app", "dev", "")
 )
 
 func main() {
-	
+
 }
 
 func TranscodeVideoProcess(vid *vpb.Video, media []structs.MediaItem, configResolutions []int, step int) []structs.MediaItem {
@@ -57,7 +58,7 @@ func TranscodeVideoProcess(vid *vpb.Video, media []structs.MediaItem, configReso
 			newMedia := TranscodeSingleVideo(vid, mediaItem, configResolutions[step])
 			media = append(media, newMedia)
 		}
-		return TranscodeVideoProcess(vid, media, configResolutions, step + 1)
+		return TranscodeVideoProcess(vid, media, configResolutions, step+1)
 	}
 	return FindClosedCaptions(vid, media) // Retrieve closed captions
 }
@@ -68,7 +69,7 @@ func TranscodeAudioProcess(vid *vpb.Video, media []structs.MediaItem) []structs.
 	media = append(media, newMedia)
 	configResolutions := make([]int, 0)
 	configResolutions = append(configResolutions, 2048, 1440, 720, 540, 360, 240) // Default resolutions to transcode
-	return TranscodeVideoProcess(vid, media, configResolutions, 0) // Transcode video files
+	return TranscodeVideoProcess(vid, media, configResolutions, 0)                // Transcode video files
 }
 
 func TranscodeSingleAudio(vid *vpb.Video, media structs.MediaItem, version string) structs.MediaItem {
@@ -89,50 +90,50 @@ func TranscodeSingleAudio(vid *vpb.Video, media structs.MediaItem, version strin
 		}
 	}
 	err = ffmpeg.Input(vid.GetPath()).
-		Output(vid.GetDestination() + vid.GetID() + "-" + version + "-raw.mp4", ffmpeg.KwArgs{
-			"vn": "", // Video none
+		Output(vid.GetDestination()+vid.GetID()+"-"+version+"-raw.mp4", ffmpeg.KwArgs{
+			"vn":  "",    // Video none
 			"c:a": "aac", // Convert all audio to aac
 			"b:a": "256k",
-			"ac": channels,
+			"ac":  channels,
 		}).
 		ErrorToStdOut().
 		Run()
 	if err != nil {
-		fmt.Printf("Issue with transcoding single audio %v\nPath: %v\nOutput: %v\n", err, vid.GetPath(), vid.GetDestination() + vid.GetID() + "-" + version + "-raw.mp4")
+		fmt.Printf("Issue with transcoding single audio %v\nPath: %v\nOutput: %v\n", err, vid.GetPath(), vid.GetDestination()+vid.GetID()+"-"+version+"-raw.mp4")
 		return media
 	}
 	return structs.MediaItem{
 		Type: "audio",
-		Url: vid.GetID() + "-" + version + "-raw.mp4",
-	};
+		Url:  vid.GetID() + "-" + version + "-raw.mp4",
+	}
 }
 
 func TranscodeSingleVideo(vid *vpb.Video, media structs.MediaItem, resolution int) structs.MediaItem {
 	curRes := strconv.Itoa(resolution)
 	err := ffmpeg.Input(vid.GetPath()).
-		Output(vid.GetDestination() + vid.GetID() + "-" + curRes + "-raw.mp4", ffmpeg.KwArgs{
-			"vf": "scale=" + "-2:" + curRes, // Sets scaled resolution with same ratios
-			"c:v": "libx264", // Set video codec
-			"crf": "24", // Level of quality
-			"tune": "film", // Codec tune setting
+		Output(vid.GetDestination()+vid.GetID()+"-"+curRes+"-raw.mp4", ffmpeg.KwArgs{
+			"vf":          "scale=" + "-2:" + curRes,             // Sets scaled resolution with same ratios
+			"c:v":         "libx264",                             // Set video codec
+			"crf":         "24",                                  // Level of quality
+			"tune":        "film",                                // Codec tune setting
 			"x264-params": "keyint=24:min-keyint=24:no-scenecut", // Group of pictures setting
-			"profile:v": "baseline",
-			"level": "3.0",
-			"pix_fmt": "yuv420p",
-			"preset": "veryfast", // Transcode speed
-			"movflags": "+faststart", // Move moov data to beginning of video with second pass for faster web start
-			"x264opts": "opencl", // Enable opencl usage to improve speed of trancoding using GPU
+			"profile:v":   "baseline",
+			"level":       "3.0",
+			"pix_fmt":     "yuv420p",
+			"preset":      "veryfast",   // Transcode speed
+			"movflags":    "+faststart", // Move moov data to beginning of video with second pass for faster web start
+			"x264opts":    "opencl",     // Enable opencl usage to improve speed of trancoding using GPU
 		}).
 		ErrorToStdOut().
 		Run()
 	if err != nil {
-		fmt.Printf("Issue with transcoding Video %v\nPath: %v\nOutput: %v\n", err, vid.GetPath(), vid.GetDestination() + vid.GetID() + "-" + curRes + "-raw.mp4")
+		fmt.Printf("Issue with transcoding Video %v\nPath: %v\nOutput: %v\n", err, vid.GetPath(), vid.GetDestination()+vid.GetID()+"-"+curRes+"-raw.mp4")
 		return media
 	}
 	return structs.MediaItem{
 		Type: "video",
-		Url: vid.GetID() + "-" + curRes + "-raw.mp4",
-	};
+		Url:  vid.GetID() + "-" + curRes + "-raw.mp4",
+	}
 }
 
 func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]structs.MediaItem, []structs.MediaItem) {
@@ -147,7 +148,7 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 			// manually grab vtt files from media property stored on record signified by operation bellow
 			liveMediaItems = append(liveMediaItems, structs.MediaItem{
 				Type: "text",
-				Url: media[i].Url,
+				Url:  media[i].Url,
 			})
 			media[i].Url = "" // Ignore file deletion here since we are not creating new files from "raw" files for vtt.
 		} else if media[i].Url != "bad" {
@@ -158,28 +159,28 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 			args = args + "in=" + media[i].Url + ",stream=" + media[i].Type + ",output=" + p
 			liveMediaItems = append(liveMediaItems, structs.MediaItem{
 				Type: media[i].Type,
-				Url: p,
+				Url:  p,
 			})
-			if (media[i].Type == "audio") {
-				p2 := matchPath[0][1] + ".m3u8" 
+			if media[i].Type == "audio" {
+				p2 := matchPath[0][1] + ".m3u8"
 				args = args + ",playlist_name=" + p2
 				liveMediaItems = append(liveMediaItems, structs.MediaItem{
 					Type: "hls-playlist",
-					Url: p2,
+					Url:  p2,
 				})
 				args = args + ",hls_group_id=audio,hls_name=ENGLISH"
 			} else {
 				p2 := matchPath[0][1] + "-" + media[i].Type + ".m3u8"
-				args = args + ",playlist_name=" +  p2
+				args = args + ",playlist_name=" + p2
 				liveMediaItems = append(liveMediaItems, structs.MediaItem{
 					Type: "hls-playlist",
-					Url: p2,
+					Url:  p2,
 				})
-				p3 :=  matchPath[0][1] + "-" + media[i].Type + "_iframe.m3u8"
+				p3 := matchPath[0][1] + "-" + media[i].Type + "_iframe.m3u8"
 				args = args + ",iframe_playlist_name=" + p3
 				liveMediaItems = append(liveMediaItems, structs.MediaItem{
 					Type: "iframe-hls-playlist",
-					Url: p3,
+					Url:  p3,
 				})
 			}
 			argsSlice = append(argsSlice, args)
@@ -188,12 +189,12 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 	var expectedMpdPath string = vid.GetID() + "-mpd.mpd"
 	liveMediaItems = append(liveMediaItems, structs.MediaItem{
 		Type: "mpd",
-		Url: expectedMpdPath,
+		Url:  expectedMpdPath,
 	})
 	var expectedHlsPath string = vid.GetID() + "-hls.m3u8"
 	liveMediaItems = append(liveMediaItems, structs.MediaItem{
 		Type: "hls",
-		Url: expectedHlsPath,
+		Url:  expectedHlsPath,
 	})
 	argsSlice = append(argsSlice, "--mpd_output")
 	argsSlice = append(argsSlice, expectedMpdPath)
@@ -213,7 +214,7 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 	if err != nil {
 		fmt.Printf("Error with packager: %v\n", err)
 	}
-	return liveMediaItems, media; // liveData, old (deleted if del true)
+	return liveMediaItems, media // liveData, old (deleted if del true)
 }
 
 func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
@@ -226,23 +227,24 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 	if err == mongo.ErrNoDocuments {
 		defaultTitle, defaultDescription := ProbeDefaultMetadata(vid)
 		document := structs.Video{
-			ID: 		vid.GetID(),
-			Author:		vid.GetSocket(),
-			Status:		status,
-			Publish:	-1,
-			Creation:	int(time.Now().UnixNano() / 1000000),
-			Mpd:		"",
-			Hls:		"",
-			Media:		[]structs.MediaItem{},
-			Thumbnail:	"",
-			Thumbtrack:	[]structs.Thumbnail{},
-			Title:		defaultTitle,
-			Description:defaultDescription,
-			Tags:		make([]interface{}, 0),
-			Production: "",
-			Cast:		make([]interface{}, 0),
-			Directors:	make([]interface{}, 0),
-			Writers:	make([]interface{}, 0),
+			ID:          vid.GetID(),
+			Author:      vid.GetSocket(),
+			Status:      status,
+			Publish:     -1,
+			Creation:    int(time.Now().UnixNano() / 1000000),
+			Mpd:         "",
+			Hls:         "",
+			Media:       []structs.MediaItem{},
+			Thumbnail:   "",
+			Thumbtrack:  []structs.Thumbnail{},
+			Title:       defaultTitle,
+			Description: defaultDescription,
+			Tags:        make([]interface{}, 0),
+			Production:  "",
+			Cast:        make([]interface{}, 0),
+			Directors:   make([]interface{}, 0),
+			Writers:     make([]interface{}, 0),
+			Timeline:    make([]interface{}, 0),
 		}
 		videos.InsertOne(context.TODO(), document)
 		return false
@@ -255,8 +257,8 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 		var v structs.Video
 		videos.FindOneAndUpdate(
 			context.TODO(),
-			bson.D{{ "_id", vid.GetID()}},
-			bson.M{ "$set": bson.M{"status": status} },
+			bson.D{{"_id", vid.GetID()}},
+			bson.M{"$set": bson.M{"status": status}},
 			opts).
 			Decode(&v)
 	}
@@ -277,23 +279,24 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 	if err == mongo.ErrNoDocuments {
 		defaultTitle, defaultDescription := ProbeDefaultMetadata(vid)
 		document := structs.Video{
-			ID: 		vid.GetID(),
-			Author:		vid.GetSocket(),
-			Status:		status,
-			Publish:	-1,
-			Creation:	int(time.Now().UnixNano() / 1000000),
-			Mpd:		"",
-			Hls:		"",
-			Media:		media,
-			Thumbnail:	"",
-			Thumbtrack:	[]structs.Thumbnail{},
-			Title:		defaultTitle,
-			Description:defaultDescription,
-			Tags:		make([]interface{}, 0),
-			Production: "",
-			Cast:		make([]interface{}, 0),
-			Directors:	make([]interface{}, 0),
-			Writers:	make([]interface{}, 0),
+			ID:          vid.GetID(),
+			Author:      vid.GetSocket(),
+			Status:      status,
+			Publish:     -1,
+			Creation:    int(time.Now().UnixNano() / 1000000),
+			Mpd:         "",
+			Hls:         "",
+			Media:       media,
+			Thumbnail:   "",
+			Thumbtrack:  []structs.Thumbnail{},
+			Title:       defaultTitle,
+			Description: defaultDescription,
+			Tags:        make([]interface{}, 0),
+			Production:  "",
+			Cast:        make([]interface{}, 0),
+			Directors:   make([]interface{}, 0),
+			Writers:     make([]interface{}, 0),
+			Timeline:    make([]interface{}, 0),
 		}
 		insertedDocument, err2 := videos.InsertOne(context.TODO(), document)
 		if err2 != nil {
@@ -310,23 +313,24 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 			trimmedMediaData = m
 		}
 		document := structs.Video{ // Upsert document
-			ID: 		vid.GetID(),
-			Author:		vid.GetSocket(),
-			Status:		status,
-			Publish:	-1,
-			Creation:	record.Creation,
-			Mpd:		FindMediaOfType(media, "mpd"),
-			Hls:		FindMediaOfType(media, "hls"),
-			Media:		trimmedMediaData,
-			Thumbnail:	FindMediaOfType(media, "thumbnail"),
-			Thumbtrack:	thumbtrack,
-			Title:		record.Title,
-			Description:record.Description,
-			Tags:		record.Tags,
-			Production: record.Production,
-			Cast:		record.Cast,
-			Directors:	record.Directors,
-			Writers:	record.Writers,
+			ID:          vid.GetID(),
+			Author:      vid.GetSocket(),
+			Status:      status,
+			Publish:     -1,
+			Creation:    record.Creation,
+			Mpd:         FindMediaOfType(media, "mpd"),
+			Hls:         FindMediaOfType(media, "hls"),
+			Media:       trimmedMediaData,
+			Thumbnail:   FindMediaOfType(media, "thumbnail"),
+			Thumbtrack:  thumbtrack,
+			Title:       record.Title,
+			Description: record.Description,
+			Tags:        record.Tags,
+			Production:  record.Production,
+			Cast:        record.Cast,
+			Directors:   record.Directors,
+			Writers:     record.Writers,
+			Timeline:    record.Timeline,
 		}
 		opts := options.FindOneAndUpdate().SetUpsert(true)
 		opts = options.FindOneAndUpdate().SetReturnDocument(options.After)
@@ -334,8 +338,8 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 		var v structs.Video
 		videos.FindOneAndUpdate(
 			context.TODO(),
-			bson.D{{ "_id", vid.GetID()}},
-			bson.M{ "$set": newDoc },
+			bson.D{{"_id", vid.GetID()}},
+			bson.M{"$set": newDoc},
 			opts).
 			Decode(&v)
 		return v, nil
@@ -353,7 +357,7 @@ func ProbeDefaultMetadata(vid *vpb.Video) (string, string) {
 	unstructuredData := make(map[string]interface{})
 	json.Unmarshal([]byte(data), &unstructuredData)
 	if _, ok := unstructuredData["format"]; ok {
-		if _, ok2 :=  unstructuredData["format"].(map[string]interface{})["tags"]; ok2 {
+		if _, ok2 := unstructuredData["format"].(map[string]interface{})["tags"]; ok2 {
 			if _, ok3 := unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["description"]; ok3 {
 				if _, ok4 := unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["description"].(string); ok4 {
 					description = unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["description"].(string)
@@ -375,7 +379,7 @@ func FindDefaultThumbnail(thumbtrack []structs.Thumbnail, media []structs.MediaI
 			if len(thumbtrack) > i {
 				media = append(media, structs.MediaItem{
 					Type: "thumbnail",
-					Url: thumbtrack[i].Url,
+					Url:  thumbtrack[i].Url,
 				})
 				break
 			}
@@ -399,7 +403,7 @@ func UploadToServers(liveMediaItems []structs.MediaItem, destination string, upl
 		config.WithRegion(s3credentials.GetS3Data("awsConfig", "mediaBucketLocation1", "")),
 		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
 			Value: aws.Credentials{
-				AccessKeyID: s3credentials.GetS3Data("awsConfig", "accessKeyId", ""), 
+				AccessKeyID:     s3credentials.GetS3Data("awsConfig", "accessKeyId", ""),
 				SecretAccessKey: s3credentials.GetS3Data("awsConfig", "secretAccessKey", ""),
 			},
 		}),
@@ -424,7 +428,7 @@ func UploadToServers(liveMediaItems []structs.MediaItem, destination string, upl
 		}
 		f, _ := os.Open(upFrom + liveMediaItems[i].Url)
 		r := bufio.NewReader(f)
-		fmt.Printf("Uploading: %v %v\n", upFrom + liveMediaItems[i].Url, upTo + liveMediaItems[i].Url)
+		fmt.Printf("Uploading: %v %v\n", upFrom+liveMediaItems[i].Url, upTo+liveMediaItems[i].Url)
 		_, err := uploader.Upload(context.TODO(), &s3.PutObjectInput{
 			Bucket: aws.String(s3VideoEndpoint),
 			Key:    aws.String(upTo + liveMediaItems[i].Url),
@@ -443,7 +447,7 @@ func UploadThumbtrackToServers(thumbtrack []structs.Thumbnail, destination strin
 		config.WithRegion(s3credentials.GetS3Data("awsConfig", "mediaBucketLocation1", "")),
 		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
 			Value: aws.Credentials{
-				AccessKeyID: s3credentials.GetS3Data("awsConfig", "accessKeyId", ""), 
+				AccessKeyID:     s3credentials.GetS3Data("awsConfig", "accessKeyId", ""),
 				SecretAccessKey: s3credentials.GetS3Data("awsConfig", "secretAccessKey", ""),
 			},
 		}),
@@ -460,7 +464,7 @@ func UploadThumbtrackToServers(thumbtrack []structs.Thumbnail, destination strin
 	for i := 0; i < len(thumbtrack); i++ {
 		f, _ := os.Open(destination + thumbtrack[i].Url)
 		r := bufio.NewReader(f)
-		fmt.Printf("Uploading: %v\n", uploadFolder + thumbtrack[i].Url)
+		fmt.Printf("Uploading: %v\n", uploadFolder+thumbtrack[i].Url)
 		_, err := uploader.Upload(context.TODO(), &s3.PutObjectInput{
 			Bucket: aws.String(s3VideoEndpoint),
 			Key:    aws.String(uploadFolder + thumbtrack[i].Url),
@@ -475,7 +479,7 @@ func UploadThumbtrackToServers(thumbtrack []structs.Thumbnail, destination strin
 }
 
 func CleanUpStrayData(media []structs.MediaItem) ([]structs.MediaItem, error) {
-	for i := len(media) -1; i > 0; i-- {
+	for i := len(media) - 1; i > 0; i-- {
 		if media[i].Type == "thumbnail" {
 			media = append(media[:i], media[i+1:]...)
 		}
@@ -487,9 +491,9 @@ func GenerateThumbnailTrack(vid *vpb.Video, thumbtrack []structs.Thumbnail) ([]s
 	var thumbDir string = vid.GetDestination() + vid.GetID() + "-thumbs"
 	os.MkdirAll(thumbDir, os.ModePerm)
 	err := ffmpeg.Input(vid.GetPath()).
-		Output(thumbDir + "/" + vid.GetID() + "-thumb%03d.jpg", ffmpeg.KwArgs{
-			"vf": "select='not(mod(n,300))',setpts='N/(30*TB)',scale=-2:180",
-			"f": "image2",
+		Output(thumbDir+"/"+vid.GetID()+"-thumb%03d.jpg", ffmpeg.KwArgs{
+			"vf":  "select='not(mod(n,300))',setpts='N/(30*TB)',scale=-2:180",
+			"f":   "image2",
 			"q:v": "6", // Quality of image. 6 is reasonable, thumbtrack total comes to half a mb for a 30 minute episode of Atlanta "The Jacket" with mod(n,300)
 		}).
 		ErrorToStdOut().
@@ -514,14 +518,14 @@ func GenerateThumbnailTrack(vid *vpb.Video, thumbtrack []structs.Thumbnail) ([]s
 	json.Unmarshal([]byte(data), &unstructuredData)
 	fmt.Printf("Streaming %v", unstructuredData)
 	if len(files) > 0 {
-		var ti float64 = 0 
+		var ti float64 = 0
 		for i, file := range files {
 			if i >= len(files) { // Double check to ensure no panic
 				break
 			}
 			t := structs.Thumbnail{
 				Time: fmt.Sprintf("%.2f", ti),
-				Url: file.Name(),
+				Url:  file.Name(),
 			}
 			thumbtrack = append(thumbtrack, t)
 			ti = ti + 10
@@ -541,14 +545,14 @@ func ScheduleProfanityCheck(vid *vpb.Video, media []structs.MediaItem) (structs.
 			break
 		}
 	}
-	if (firstVideo == "") {
+	if firstVideo == "" {
 		return structs.Video{}, err
 	}
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithRegion(s3credentials.GetS3Data("awsConfig", "mediaBucketLocation1", "")),
 		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
 			Value: aws.Credentials{
-				AccessKeyID: s3credentials.GetS3Data("awsConfig", "accessKeyId", ""), 
+				AccessKeyID:     s3credentials.GetS3Data("awsConfig", "accessKeyId", ""),
 				SecretAccessKey: s3credentials.GetS3Data("awsConfig", "secretAccessKey", ""),
 			},
 		}),
@@ -560,20 +564,20 @@ func ScheduleProfanityCheck(vid *vpb.Video, media []structs.MediaItem) (structs.
 		s3VideoEndpoint = s3credentials.GetS3Data("awsConfig", "devBuckets", "tycoon-systems-video-development")
 	}
 	rekognitionClient := rekognition.NewFromConfig(cfg)
-	fmt.Printf("Dev Env %v, Video to Check on s3 %v\n", s3VideoEndpoint, "video/" + firstVideo)
+	fmt.Printf("Dev Env %v, Video to Check on s3 %v\n", s3VideoEndpoint, "video/"+firstVideo)
 	startContentModerationOutput, err := rekognitionClient.StartContentModeration(
 		context.TODO(),
 		&rekognition.StartContentModerationInput{
 			Video: &rekognitionTypes.Video{
 				S3Object: &rekognitionTypes.S3Object{
 					Bucket: aws.String(s3VideoEndpoint),
-					Name: aws.String("video/" + firstVideo),
+					Name:   aws.String("video/" + firstVideo),
 				},
 			},
 			ClientRequestToken: aws.String(vid.GetID()),
-			JobTag: aws.String("video"),
+			JobTag:             aws.String("video"),
 			NotificationChannel: &rekognitionTypes.NotificationChannel{
-				RoleArn: aws.String(s3credentials.GetS3Data("awsConfig", "rekognitionRoleArnId", "")),
+				RoleArn:     aws.String(s3credentials.GetS3Data("awsConfig", "rekognitionRoleArnId", "")),
 				SNSTopicArn: aws.String(s3credentials.GetS3Data("awsConfig", "rekognitionSnsTopicArnId", "")),
 			},
 		},
@@ -583,15 +587,15 @@ func ScheduleProfanityCheck(vid *vpb.Video, media []structs.MediaItem) (structs.
 		return structs.Video{}, err
 	}
 	o := rekognition.StartContentModerationOutput{
-		JobId: 				startContentModerationOutput.JobId,
-		ResultMetadata: 	startContentModerationOutput.ResultMetadata,
+		JobId:          startContentModerationOutput.JobId,
+		ResultMetadata: startContentModerationOutput.ResultMetadata,
 	}
 	jobId := *o.JobId
 	var m middleware.Metadata = o.ResultMetadata
 	fmt.Printf("Rekognition Job Id %v\n", jobId)
-	fmt.Printf("Metadata %v\n", m) 
+	fmt.Printf("Metadata %v\n", m)
 	co, err := rekognitionClient.GetContentModeration(
-		context.TODO(), 
+		context.TODO(),
 		&rekognition.GetContentModerationInput{
 			JobId: aws.String(jobId),
 		},
@@ -608,13 +612,13 @@ func ScheduleProfanityCheck(vid *vpb.Video, media []structs.MediaItem) (structs.
 	record := &structs.Video{}
 	err = videos.FindOne(context.TODO(), bson.D{{"_id", vid.GetID()}}).Decode(&record) // Get from phone number data
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
-		var v structs.Video
-		videos.FindOneAndUpdate(
-			context.TODO(),
-			bson.D{{ "_id", vid.GetID()}},
-			bson.M{ "$set": bson.M{"status": "check:" + jobId} },
-			opts).
-			Decode(&v)
+	var v structs.Video
+	videos.FindOneAndUpdate(
+		context.TODO(),
+		bson.D{{"_id", vid.GetID()}},
+		bson.M{"$set": bson.M{"status": "check:" + jobId}},
+		opts).
+		Decode(&v)
 	return *record, nil
 }
 
@@ -632,7 +636,7 @@ func OrganizeAndDeleteThumbnails(thumbtrack []structs.Thumbnail, files []fs.File
 		for i := 0; i < len(files); i++ {
 			t := structs.Thumbnail{
 				Time: "",
-				Url: files[i].Name(),
+				Url:  files[i].Name(),
 			}
 			thumbtrack = append(thumbtrack, t)
 		}
@@ -645,7 +649,7 @@ func DeleteThumbnails(stale []structs.Thumbnail, dir string) error {
 	for i := 0; i < len(stale); i++ {
 		DeleteFile(stale[i].Url, dir)
 	}
-	return nil 
+	return nil
 }
 
 func DeleteMediaItemFiles(stale []structs.MediaItem, dir string) error {
@@ -675,8 +679,8 @@ func GetVideoSize(path string) (int, int) {
 	type VideoInfo struct {
 		Streams []struct {
 			CodecType string `json:"codec_type"`
-			Width int
-			Height int
+			Width     int
+			Height    int
 		} `json:"streams"`
 	}
 	videoInfo := &VideoInfo{}
@@ -720,7 +724,7 @@ func FindClosedCaptions(vid *vpb.Video, media []structs.MediaItem) []structs.Med
 		if err == nil {
 			media = append(media, structs.MediaItem{
 				Type: "text",
-				Url: vid.GetID() + "-" + strconv.Itoa(i) + "-subtitle" + ".vtt",
+				Url:  vid.GetID() + "-" + strconv.Itoa(i) + "-subtitle" + ".vtt",
 			})
 		}
 	}
