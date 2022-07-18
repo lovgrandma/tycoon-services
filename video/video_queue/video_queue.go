@@ -3,37 +3,40 @@ package video_queue
 import (
 	"tycoon.systems/tycoon-services/s3credentials"
 	// "go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"context"
-	"tycoon.systems/tycoon-services/structs"
-	"github.com/hibiken/asynq"
-	"reflect"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
+	"github.com/hibiken/asynq"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"tycoon.systems/tycoon-services/structs"
+
 	// "strings"
 	"log"
 	// "github.com/go-redis/redis/v8"
 	"time"
-	
+
+	"os"
+
+	"google.golang.org/grpc"
 	vpb "tycoon.systems/tycoon-services/video"
 	"tycoon.systems/tycoon-services/video/video_queue/transcode"
-	"google.golang.org/grpc"
-	"os"
 )
 
 var (
-	uri = s3credentials.GetS3Data("mongo", "addressAuth", "")
+	uri        = s3credentials.GetS3Data("mongo", "addressAuth", "")
 	credential = options.Credential{
 		AuthSource: "admin",
-		Username: s3credentials.GetS3Data("mongo", "u", ""),
-		Password: s3credentials.GetS3Data("mongo", "p", ""),
+		Username:   s3credentials.GetS3Data("mongo", "u", ""),
+		Password:   s3credentials.GetS3Data("mongo", "p", ""),
 	}
 	clientOpts = options.Client().ApplyURI(uri).
-   		SetAuth(credential)
-	client, err = mongo.Connect(context.TODO(), clientOpts)
-	jobQueueAddr = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_video_queue_port", "")
-	jobClient = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
+			SetAuth(credential)
+	client, err         = mongo.Connect(context.TODO(), clientOpts)
+	jobQueueAddr        = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_video_queue_port", "")
+	jobClient           = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
 	returnJobResultPort = "6003"
 	returnJobResultAddr = s3credentials.GetS3Data("app", "prodhost", "")
 )
@@ -43,21 +46,21 @@ const (
 )
 
 func main() {
-	
+
 }
 
 func ProvisionVideoJob(vid *vpb.Video) string {
 	if reflect.TypeOf(vid.ID).Kind() == reflect.String &&
-	reflect.TypeOf(vid.Status).Kind() == reflect.String &&
-	reflect.TypeOf(vid.Socket).Kind() == reflect.String &&
-	reflect.TypeOf(vid.Destination).Kind() == reflect.String &&
-	reflect.TypeOf(vid.Filename).Kind() == reflect.String &&
-	reflect.TypeOf(vid.Path).Kind() == reflect.String {
+		reflect.TypeOf(vid.Status).Kind() == reflect.String &&
+		reflect.TypeOf(vid.Socket).Kind() == reflect.String &&
+		reflect.TypeOf(vid.Destination).Kind() == reflect.String &&
+		reflect.TypeOf(vid.Filename).Kind() == reflect.String &&
+		reflect.TypeOf(vid.Path).Kind() == reflect.String {
 		task, err := NewVideoProcessTask(vid)
 		if err != nil {
 			log.Printf("Could not create Video Process task at Task Creation: %v", err)
 		}
-		info, err := jobClient.Enqueue(task, asynq.Timeout(5 * time.Hour))
+		info, err := jobClient.Enqueue(task, asynq.Timeout(5*time.Hour))
 		if err != nil {
 			log.Printf("Could not create Video Process task at Enqueue: %v", err)
 		}
@@ -106,7 +109,7 @@ func PerformVideoProcess(vid *vpb.Video) error {
 	var liveMediaItems []structs.MediaItem
 	liveMediaItems, _ = transcode.PackageManifest(vid, transcodedMedia, true) // Package manifest files
 	liveMediaItems = transcode.FindDefaultThumbnail(thumbtrack, liveMediaItems)
-	doc, _ := transcode.UpdateMongoRecord(vid, liveMediaItems, "check", thumbtrack, false) // Update record
+	doc, _ := transcode.UpdateMongoRecord(vid, liveMediaItems, "upload", thumbtrack, false)    // Update record
 	err := transcode.UploadToServers(liveMediaItems, vid.GetDestination(), "video/", thumbDir) // Send to Streaming servers
 	if err != nil {
 		fmt.Printf("issue with uploading to S3 %v\n", err)
@@ -139,7 +142,7 @@ func returnFinishedJobReport(vid structs.Video) {
 	if os.Getenv("dev") == "true" {
 		useReturnJobResultAddr = "localhost"
 	}
-	conn, err := grpc.Dial(useReturnJobResultAddr + ":" + returnJobResultPort, grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.Dial(useReturnJobResultAddr+":"+returnJobResultPort, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		fmt.Printf("Err: %v", err)
 	}
@@ -149,12 +152,12 @@ func returnFinishedJobReport(vid structs.Video) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		c.ReturnVideoJobResult(ctx, &vpb.Video{
-			ID: vid.ID, 
-			Status: vid.Status,
-			Socket: vid.Author,
+			ID:          vid.ID,
+			Status:      vid.Status,
+			Socket:      vid.Author,
 			Destination: "",
-			Filename: "",
-			Path: "",
+			Filename:    "",
+			Path:        "",
 		})
 	}
 }

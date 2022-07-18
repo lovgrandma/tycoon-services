@@ -81,3 +81,13 @@ type Thumbnail struct {
 	Time string
 	Url  string
 }
+
+/* Ad */
+
+type VastTag struct {
+	ID         string `bson:"_id" json:"id,omitempty"`
+	Status     string
+	Socket     string
+	Url        string
+	DocumentId string
+}

@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package ad;
+
+option go_package = "tycoon.systems/tycoon-services;tycoon_services";
+
+/* Methods that must be consumed by Node.js must start with lowercase.
+Methods that must be consumed by Go must start with uppercase. */
+
+service adManagement {
+    rpc CreateNewAdVast (NewVast) returns (Vast) {}
+    rpc returnVastJobResult (Vast) returns (Vast) {}
+}
+
+message NewVast {
+    string      Identifier = 1;
+    string      DocumentId = 2;
+    string      Username = 3;
+    string      Socket = 4;
+    string      Destination = 5;
+    string      Filename = 6;
+    string      Path = 7;
+    string      Uuid = 8;
+    string      Hash = 9;
+}
+
+message Vast {
+    string      ID = 1;
+    string      DocumentId = 2;
+    string      Status = 3;
+    string      Socket = 4;
+    string      Destination = 5;
+    string      Filename = 6;
+    string      Path = 7;
+}
