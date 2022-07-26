@@ -85,9 +85,43 @@ type Thumbnail struct {
 /* Ad */
 
 type VastTag struct {
-	ID         string `bson:"_id" json:"id,omitempty"`
-	Status     string
-	Socket     string
-	Url        string
-	DocumentId string
+	ID              string `bson:"_id" json:"id,omitempty"`
+	Status          string
+	Socket          string
+	Url             string
+	DocumentId      string
+	TrackingUrl     string
+	AdTitle         string
+	ClickthroughUrl string
+	CallToAction    string
+}
+
+type AdUnit struct {
+	ID                string `bson:"_id" json:"id,omitempty"`
+	AdType            string
+	DocumentId        string
+	UserId            string
+	Status            string
+	Publish           bool
+	Creation          int
+	CallToAction      string
+	AdTitle           string
+	AdDescription     string
+	ClickthroughUrl   string
+	MaxCampaignBudget string
+	DailyBudget       string
+	AdvertEndTime     string
+	Vast              string
+	Vpaid             string
+	History           []AdHistoryItem
+}
+
+type AdHistoryItem struct {
+	CallToAction      string
+	AdTitle           string
+	AdDescription     string
+	ClickthroughUrl   string
+	MaxCampaignBudget string
+	DailyBudget       string
+	AdvertEndTime     string
 }

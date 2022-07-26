@@ -49,11 +49,14 @@ func (a *AdManagementServer) CreateNewAdVast(ctx context.Context, in *adpb.NewVa
 		reflect.TypeOf(in.GetUsername()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetSocket()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetUuid()).Kind() == reflect.String &&
-		reflect.TypeOf(in.GetHash()).Kind() == reflect.String {
-		if len(in.GetIdentifier()) > 0 && len(in.GetUsername()) > 0 && len(in.GetSocket()) > 0 && len(in.GetUuid()) > 0 && len(in.GetHash()) > 0 {
+		reflect.TypeOf(in.GetHash()).Kind() == reflect.String &&
+		reflect.TypeOf(in.GetTrackingUrl()).Kind() == reflect.String &&
+		reflect.TypeOf(in.GetAdTitle()).Kind() == reflect.String &&
+		reflect.TypeOf(in.GetClickthroughUrl()).Kind() == reflect.String {
+		if len(in.GetIdentifier()) > 0 && len(in.GetUsername()) > 0 && len(in.GetSocket()) > 0 && len(in.GetUuid()) > 0 && len(in.GetHash()) > 0 && len(in.GetTrackingUrl()) > 0 && len(in.GetAdTitle()) > 0 && len(in.GetClickthroughUrl()) > 0 {
 			var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash()) // Access mongo and check user identifier against hash to determine if request should be honoured
 			if authenticated != false {
-				jobProvisioned := ad_queue.ProvisionVastJob(structs.VastTag{ID: in.GetUuid(), Socket: in.GetIdentifier(), Status: "Pending", Url: "", DocumentId: in.GetDocumentId()})
+				jobProvisioned := ad_queue.ProvisionVastJob(structs.VastTag{ID: in.GetUuid(), Socket: in.GetIdentifier(), Status: "Pending", Url: "", DocumentId: in.GetDocumentId(), TrackingUrl: in.GetTrackingUrl(), AdTitle: in.GetAdTitle(), ClickthroughUrl: in.GetClickthroughUrl()})
 				if jobProvisioned != "failed" {
 					return &adpb.Vast{Status: "Good", ID: in.GetUuid(), Socket: in.GetIdentifier()}, nil
 				}

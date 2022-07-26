@@ -22,6 +22,10 @@ message NewVast {
     string      Path = 7;
     string      Uuid = 8;
     string      Hash = 9;
+    string      TrackingUrl = 10;
+    string      AdTitle = 11;
+    string      ClickthroughUrl = 12;
+    string      CallToAction = 13;
 }
 
 message Vast {
