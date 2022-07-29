@@ -29,10 +29,12 @@ func returnRawJsonBytes() []byte {
             "rekognitionSqsQueue": "https://sqs.us-east-2.amazonaws.com/546584803456/TycoonProfanityCheck",
             "rekognitionSqsQueueArn": "arn:aws:sqs:us-east-2:546584803456:TycoonProfanityCheck",
             "buckets": [
-                "tycoon-systems-video"
+                "tycoon-systems-video",
+                "tycoon-systems-ads"
             ],
             "devBuckets": [
-                "tycoon-systems-video-development"
+                "tycoon-systems-video-development",
+                "tycoon-systems-ads-development"
             ],
             "mediaBucketLocation1": "us-east-2"
         },

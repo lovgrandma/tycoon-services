@@ -42,7 +42,7 @@ var (
 	returnJobResultPort  = "6005"
 	returnJobResultAddr  = s3credentials.GetS3Data("app", "prodhost", "")
 	vastUploadFolderPath = "../tycoon-services-vast-generation/"
-	s3VideoEndpoint      = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-video")
+	s3VideoEndpoint      = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-ads")
 	devEnv               = s3credentials.GetS3Data("app", "dev", "")
 )
 
@@ -226,7 +226,7 @@ func UploadVastS3(fileName string) (string, error) {
 	client := s3.NewFromConfig(cfg)
 	uploader := manager.NewUploader(client)
 	if devEnv == "true" {
-		s3VideoEndpoint = s3credentials.GetS3Data("awsConfig", "devBuckets", "tycoon-systems-video-development")
+		s3VideoEndpoint = s3credentials.GetS3Data("awsConfig", "devBuckets", "tycoon-systems-ads-development")
 	}
 	fmt.Printf("s3VideoEndpoint %v\n", s3VideoEndpoint)
 	upFrom := vastUploadFolderPath
