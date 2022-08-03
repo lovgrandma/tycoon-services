@@ -24,7 +24,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	// "strings"
+
+	"encoding/xml"
 	"log"
+	"net/http"
 )
 
 var (
@@ -208,6 +211,123 @@ func GenerateVast(vast structs.VastTag) (string, error) {
 	f.Close()
 	return vast.ID + ".xml", nil
 }
+
+// StringMap is a map[string]string.
+type StringMap map[string]string
+
+// StringMap marshals into XML.
+func (s StringMap) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+
+	tokens := []xml.Token{start}
+
+	for key, value := range s {
+		t := xml.StartElement{Name: xml.Name{"", key}}
+		tokens = append(tokens, t, xml.CharData(value), xml.EndElement{t.Name})
+	}
+
+	tokens = append(tokens, xml.EndElement{start.Name})
+
+	for _, t := range tokens {
+		err := e.EncodeToken(t)
+		if err != nil {
+			return err
+		}
+	}
+
+	// flush to ensure tokens are written
+	return e.Flush()
+}
+
+type Vmap struct {
+	XMLName  xml.Name  `xml:"vmap:VMAP"`
+	VmapAttr string    `xml:"xmlns:vmap,attr"`
+	Version  string    `xml:"version,attr"`
+	AdBreaks []AdBreak `xmlns:"vmap,namespace"`
+}
+
+type AdBreak struct {
+	XMLName    xml.Name `xml:"vmap:AdBreak"`
+	TimeOffset string   `xml:"timeOffset,attr"`
+	BreakType  string   `xml:"breakType,attr"`
+	BreakId    string   `xml:"breakId,attr"`
+	AdSource   AdSource `xmlns:"vmap,namespace"`
+}
+
+type AdSource struct {
+	XMLName          xml.Name `xml:"vmap:AdSource"`
+	Id               string   `xml:"id,attr"`
+	AllowMultipleAds string   `xml:"allowMultipleAds,attr"`
+	FollowRedirects  string   `xml:"followRedirects,attr"`
+}
+
+func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
+	response := Vmap{
+		xml.Name{},
+		"http://www.iab.net/videosuite/vmap",
+		"1.0",
+		[]AdBreak{
+			{xml.Name{}, "start", "linear", "preroll",
+				AdSource{xml.Name{}, "preroll-ad-1", "false", "true"},
+			},
+			{xml.Name{}, "00:00:15", "linear", "midroll-1",
+				AdSource{xml.Name{}, "midroll-1-ad-1", "false", "true"},
+			},
+		},
+	}
+
+	x, err := xml.MarshalIndent(response, "", " ")
+	if err != nil {
+		return nil, err
+	}
+	return []byte(x), nil
+}
+
+// func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
+// 	var tmpl string = `<vmap:VMAP xmlns:vmap="http://www.iab.net/videosuite/vmap" name,attr version="1.0">
+// 	<vmap:AdBreak timeOffset="start" breakType="linear" breakId="preroll">
+// 		<vmap:AdSource id="preroll-ad-1" allowMultipleAds="false" followRedirects="true">
+// 			<vmap:AdTagURI templateType="vast3">
+// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=preroll&pod=1&ppos=1&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
+// 			</vmap:AdTagURI>
+// 		</vmap:AdSource>
+// 	</vmap:AdBreak>
+// 	<vmap:AdBreak timeOffset="00:00:15.000" breakType="linear" breakId="midroll-1">
+// 		<vmap:AdSource id="midroll-1-ad-1" allowMultipleAds="false" followRedirects="true">
+// 			<vmap:AdTagURI templateType="vast3">
+// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&cue=15000&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=midroll&pod=2&mridx=1&rmridx=1&ppos=1&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
+// 			</vmap:AdTagURI>
+// 		</vmap:AdSource>
+// 	</vmap:AdBreak>
+// 	<vmap:AdBreak timeOffset="00:00:15.000" breakType="linear" breakId="midroll-1">
+// 		<vmap:AdSource id="midroll-1-ad-2" allowMultipleAds="false" followRedirects="true">
+// 			<vmap:AdTagURI templateType="vast3">
+// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&cue=15000&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=midroll&pod=2&mridx=1&rmridx=1&ppos=2&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
+// 			</vmap:AdTagURI>
+// 		</vmap:AdSource>
+// 	</vmap:AdBreak>
+// 	<vmap:AdBreak timeOffset="00:00:15.000" breakType="linear" breakId="midroll-1">
+// 		<vmap:AdSource id="midroll-1-ad-3" allowMultipleAds="false" followRedirects="true">
+// 			<vmap:AdTagURI templateType="vast3">
+// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&cue=15000&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=midroll&pod=2&mridx=1&rmridx=1&ppos=3&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
+// 			</vmap:AdTagURI>
+// 		</vmap:AdSource>
+// 	</vmap:AdBreak>
+// 	<vmap:AdBreak timeOffset="end" breakType="linear" breakId="postroll">
+// 		<vmap:AdSource id="postroll-ad-1" allowMultipleAds="false" followRedirects="true">
+// 			<vmap:AdTagURI templateType="vast3">
+// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=postroll&pod=3&ppos=1&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
+// 			</vmap:AdTagURI>
+// 		</vmap:AdSource>
+// 	</vmap:AdBreak>
+// </vmap:VMAP>
+// `
+// 	// if err := xml.Unmarshal([]byte(tmpl), s); err != nil {
+// 	// 	fmt.Printf("Err Marshalling %v", err)
+// 	// }
+// 	m := map[string]string{"vmap:name xmlns:vmap=\"http://www.iab.net/videosuite/vmap\" version=\"1.0\"": tmpl}
+// 	output, _ := xml.MarshalIndent(StringMap(m), "", " ")
+// 	return output, nil
+// }
 
 func UploadVastS3(fileName string) (string, error) {
 	fmt.Printf("%v, %v", fileName, vastUploadFolderPath)

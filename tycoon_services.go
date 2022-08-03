@@ -23,12 +23,15 @@ import (
 	adpb "tycoon.systems/tycoon-services/ad"
 	pb "tycoon.systems/tycoon-services/sms"
 	vpb "tycoon.systems/tycoon-services/video"
+
+	"net/http"
 )
 
 const (
-	port      = ":6000"
-	videoPort = ":6002"
-	adPort    = ":6004"
+	port         = ":6000"
+	videoPort    = ":6002"
+	adPort       = ":6004"
+	adServerPort = ":6010"
 )
 
 type SmsManagementServer struct {
@@ -52,11 +55,12 @@ func (a *AdManagementServer) CreateNewAdVast(ctx context.Context, in *adpb.NewVa
 		reflect.TypeOf(in.GetHash()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetTrackingUrl()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetAdTitle()).Kind() == reflect.String &&
-		reflect.TypeOf(in.GetClickthroughUrl()).Kind() == reflect.String {
-		if len(in.GetIdentifier()) > 0 && len(in.GetUsername()) > 0 && len(in.GetSocket()) > 0 && len(in.GetUuid()) > 0 && len(in.GetHash()) > 0 && len(in.GetTrackingUrl()) > 0 && len(in.GetAdTitle()) > 0 && len(in.GetClickthroughUrl()) > 0 {
+		reflect.TypeOf(in.GetClickthroughUrl()).Kind() == reflect.String &&
+		reflect.TypeOf(in.GetCallToAction()).Kind() == reflect.String {
+		if len(in.GetIdentifier()) > 0 && len(in.GetUsername()) > 0 && len(in.GetSocket()) > 0 && len(in.GetUuid()) > 0 && len(in.GetHash()) > 0 && len(in.GetTrackingUrl()) > 0 && len(in.GetAdTitle()) > 0 && len(in.GetClickthroughUrl()) > 0 && len(in.GetCallToAction()) > 0 {
 			var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash()) // Access mongo and check user identifier against hash to determine if request should be honoured
 			if authenticated != false {
-				jobProvisioned := ad_queue.ProvisionVastJob(structs.VastTag{ID: in.GetUuid(), Socket: in.GetIdentifier(), Status: "Pending", Url: "", DocumentId: in.GetDocumentId(), TrackingUrl: in.GetTrackingUrl(), AdTitle: in.GetAdTitle(), ClickthroughUrl: in.GetClickthroughUrl()})
+				jobProvisioned := ad_queue.ProvisionVastJob(structs.VastTag{ID: in.GetUuid(), Socket: in.GetIdentifier(), Status: "Pending", Url: "", DocumentId: in.GetDocumentId(), TrackingUrl: in.GetTrackingUrl(), AdTitle: in.GetAdTitle(), ClickthroughUrl: in.GetClickthroughUrl(), CallToAction: in.GetCallToAction()})
 				if jobProvisioned != "failed" {
 					return &adpb.Vast{Status: "Good", ID: in.GetUuid(), Socket: in.GetIdentifier()}, nil
 				}
@@ -127,10 +131,56 @@ func main() {
 	go sms_workers.BuildWorkerServer()   // Server for SMS job queue
 	go video_workers.BuildWorkerServer() // Server for video job queue
 	go ad_workers.BuildWorkerServer()    // Server for ad job queue
+	go serveAdCompliantServer()
 	log.Printf("Server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
 	}
+}
+
+func serveAdCompliantServer() {
+	http.HandleFunc("/ads/vmap", handleAdRequests)
+	err := http.ListenAndServe(adServerPort, nil)
+	if err != nil {
+		log.Fatalf("Failed to run Ad Compliant Server: %v", err)
+	}
+	log.Printf("Ad Compliant Server listening at %v", adServerPort)
+}
+
+type Origin struct {
+	Name string
+}
+
+func handleAdRequests(w http.ResponseWriter, r *http.Request) {
+	// log.Printf("%v", r)
+	origin := r.Header.Get("Origin")
+	supportedOrigins := []Origin{{"https://www.tycoon.systems"}, {"www.tycoon.systems"}, {"https://imasdk.googleapis.com"}, {"imasdk.googleapis.com"}, {"http://localhost:3000"}, {"localhost:3000"}}
+	match := false
+
+	for i := range supportedOrigins {
+		if supportedOrigins[i].Name == origin {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			match = true
+		}
+	}
+	if match == false {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
+
+	vmap, err := ad_queue.GenerateAndServeVmap(r)
+	if err != nil {
+		return
+	}
+
+	// x, err := xml.Marshal(vmap)
+	// if err != nil {
+	// 	http.Error(w, err.Error(), http.StatusInternalServerError)
+	// 	return
+	// }
+
+	w.Header().Set("Content-Type", "application/xml")
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
+	w.Write(vmap)
 }
 
 func newVideoServer() *grpc.Server {
