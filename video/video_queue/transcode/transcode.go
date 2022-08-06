@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -223,7 +224,7 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 	}
 	videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
 	record := &structs.Video{}
-	err := videos.FindOne(context.TODO(), bson.D{{"_id", vid.GetID()}}).Decode(&record) // Get from phone number data
+	err := videos.FindOne(context.TODO(), bson.D{{"_id", vid.GetID()}}).Decode(&record) // Get from video data
 	if err == mongo.ErrNoDocuments {
 		defaultTitle, defaultDescription := ProbeDefaultMetadata(vid)
 		document := structs.Video{
@@ -245,6 +246,7 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 			Directors:   make([]interface{}, 0),
 			Writers:     make([]interface{}, 0),
 			Timeline:    make([]interface{}, 0),
+			Duration:    FindDuration(vid),
 		}
 		videos.InsertOne(context.TODO(), document)
 		return false
@@ -297,6 +299,7 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 			Directors:   make([]interface{}, 0),
 			Writers:     make([]interface{}, 0),
 			Timeline:    make([]interface{}, 0),
+			Duration:    FindDuration(vid),
 		}
 		insertedDocument, err2 := videos.InsertOne(context.TODO(), document)
 		if err2 != nil {
@@ -331,6 +334,7 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 			Directors:   record.Directors,
 			Writers:     record.Writers,
 			Timeline:    record.Timeline,
+			Duration:    record.Duration,
 		}
 		opts := options.FindOneAndUpdate().SetUpsert(true)
 		opts = options.FindOneAndUpdate().SetReturnDocument(options.After)
@@ -729,4 +733,28 @@ func FindClosedCaptions(vid *vpb.Video, media []structs.MediaItem) []structs.Med
 		}
 	}
 	return media
+}
+
+func FindDuration(vid *vpb.Video) int {
+	fmt.Printf("Find and record duration")
+	data, err := ffmpeg.Probe(vid.GetPath())
+	if err != nil {
+		fmt.Printf("Issue with probing video for audio data")
+	}
+	unstructuredData := make(map[string]interface{})
+	json.Unmarshal([]byte(data), &unstructuredData)
+	fmt.Printf("Data %v", unstructuredData)
+	if _, ok := unstructuredData["format"]; ok {
+		if _, ok2 := unstructuredData["format"].(map[string]interface{})["duration"]; ok2 {
+			if _, ok3 := unstructuredData["format"].(map[string]interface{})["duration"].(string); ok3 {
+				resolvedInt, err2 := strconv.Atoi(strings.Split(unstructuredData["format"].(map[string]interface{})["duration"].(string), ".")[0])
+				if err2 == nil {
+					return resolvedInt
+				} else {
+					fmt.Printf("Error resolving duration of Video %v", err2)
+				}
+			}
+		}
+	}
+	return 0
 }

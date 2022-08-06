@@ -70,6 +70,7 @@ type Video struct {
 	Directors   []interface{}
 	Writers     []interface{}
 	Timeline    []interface{}
+	Duration    int
 }
 
 type MediaItem struct {
@@ -80,6 +81,17 @@ type MediaItem struct {
 type Thumbnail struct {
 	Time string
 	Url  string
+}
+
+type TimelineNode struct {
+	Type   string // Type "do-not-play-ads", "do-not-play-midrolls", "ad-marker", "inline-ad-marker", "product"
+	Amount int    // e.g amount of midrolls 1-4
+	Time   int    // Time of node activation
+	Data   TimelineData
+}
+
+type TimelineData struct {
+	UpTime int // Time in seconds that timeline node stays up
 }
 
 /* Ad */
@@ -108,9 +120,9 @@ type AdUnit struct {
 	AdTitle           string
 	AdDescription     string
 	ClickthroughUrl   string
-	MaxCampaignBudget string
-	DailyBudget       string
-	AdvertEndTime     string
+	MaxCampaignBudget int
+	DailyBudget       int
+	AdvertEndTime     int
 	Vast              string
 	Vpaid             string
 	History           []AdHistoryItem

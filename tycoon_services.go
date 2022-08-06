@@ -138,13 +138,14 @@ func main() {
 	}
 }
 
-func serveAdCompliantServer() {
+func serveAdCompliantServer() *http.Server {
 	http.HandleFunc("/ads/vmap", handleAdRequests)
+	log.Printf("Ad Compliant Server listening at %v", adServerPort)
 	err := http.ListenAndServe(adServerPort, nil)
 	if err != nil {
 		log.Fatalf("Failed to run Ad Compliant Server: %v", err)
 	}
-	log.Printf("Ad Compliant Server listening at %v", adServerPort)
+	return &http.Server{}
 }
 
 type Origin struct {
@@ -161,6 +162,7 @@ func handleAdRequests(w http.ResponseWriter, r *http.Request) {
 		if supportedOrigins[i].Name == origin {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			match = true
+			break
 		}
 	}
 	if match == false {
@@ -169,14 +171,9 @@ func handleAdRequests(w http.ResponseWriter, r *http.Request) {
 
 	vmap, err := ad_queue.GenerateAndServeVmap(r)
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// x, err := xml.Marshal(vmap)
-	// if err != nil {
-	// 	http.Error(w, err.Error(), http.StatusInternalServerError)
-	// 	return
-	// }
 
 	w.Header().Set("Content-Type", "application/xml")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")

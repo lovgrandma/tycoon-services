@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	"html/template"
 	"os"
@@ -47,6 +48,8 @@ var (
 	vastUploadFolderPath = "../tycoon-services-vast-generation/"
 	s3VideoEndpoint      = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-ads")
 	devEnv               = s3credentials.GetS3Data("app", "dev", "")
+	adServerEndPoint     = s3credentials.GetS3Data("app", "server", "")
+	adServerPort         = s3credentials.GetS3Data("app", "adServerPort", "")
 )
 
 const (
@@ -212,32 +215,6 @@ func GenerateVast(vast structs.VastTag) (string, error) {
 	return vast.ID + ".xml", nil
 }
 
-// StringMap is a map[string]string.
-type StringMap map[string]string
-
-// StringMap marshals into XML.
-func (s StringMap) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
-
-	tokens := []xml.Token{start}
-
-	for key, value := range s {
-		t := xml.StartElement{Name: xml.Name{"", key}}
-		tokens = append(tokens, t, xml.CharData(value), xml.EndElement{t.Name})
-	}
-
-	tokens = append(tokens, xml.EndElement{start.Name})
-
-	for _, t := range tokens {
-		err := e.EncodeToken(t)
-		if err != nil {
-			return err
-		}
-	}
-
-	// flush to ensure tokens are written
-	return e.Flush()
-}
-
 type Vmap struct {
 	XMLName  xml.Name  `xml:"vmap:VMAP"`
 	VmapAttr string    `xml:"xmlns:vmap,attr"`
@@ -258,21 +235,104 @@ type AdSource struct {
 	Id               string   `xml:"id,attr"`
 	AllowMultipleAds string   `xml:"allowMultipleAds,attr"`
 	FollowRedirects  string   `xml:"followRedirects,attr"`
+	AdTagUri         AdTagUri `xmlns:"vmap,namespace"`
+}
+
+type AdTagUri struct {
+	XMLName      xml.Name `xml:"vmap:AdTagURI"`
+	TemplateType string   `xml:"templateType,attr"`
+	Url          string   `xml:",innerxml"`
+}
+
+func GetVideoDuration(document string) (int, error) {
+	videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
+	record := &structs.Video{}
+	err := videos.FindOne(context.TODO(), bson.D{{"_id", document}}).Decode(&record) // Get from video data
+	if err != nil {
+		return 0, fmt.Errorf("Get Video Duration failed")
+	}
+	return record.Duration, nil
 }
 
 func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
+	var document string = r.URL.Query().Get("document") // Get document id value
+	var docType string = r.URL.Query().Get("type")      // Get document type
+	duration, err := GetVideoDuration(document)         // Get duration to determine length of video for ad breaks
+	fmt.Printf("Duration, docType %v, %v,", docType, duration)
+	record := &structs.Video{}
+	if client != nil {
+		videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
+		record = &structs.Video{}
+		err = videos.FindOne(context.TODO(), bson.D{{"_id", document}}).Decode(&record) // Get from video data
+	}
+	adExceptions := []string{"do-not-play-ads", "do-not-play-midrolls"}
+	foundRolls := 0
+	foundAdsAbsolved := false
+	for i := 0; i < len(record.Timeline); i++ {
+		if _, ok := record.Timeline[i].(structs.TimelineNode); ok {
+			field := record.Timeline[i].(structs.TimelineNode).Type
+			for j := 0; j < len(adExceptions); j++ {
+				if field == adExceptions[j] {
+					foundAdsAbsolved = true
+				}
+			}
+			if field == "ad-marker" {
+				foundRolls += 1
+			}
+		}
+	}
+	// No valid ads on timeline and asking to not absolve from midrolls, create default timeline based on duration
+	if foundRolls == 0 && foundAdsAbsolved == false {
+		record.Timeline = GenerateMockTimeline(duration) // Generate timeline to iterate through ad points
+	}
+	validMidRolls := resolveValidAdsMidRolls(r)
+	fmt.Printf("Rolls %v", validMidRolls)
+	var adBreaks []AdBreak
+	// Append Pre-roll
+	adBreaks = append(adBreaks,
+		AdBreak{xml.Name{}, "start", "linear", "preroll",
+			AdSource{xml.Name{}, "preroll-ad-1", "false", "true",
+				AdTagUri{xml.Name{}, "vast3", "<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=preroll&pod=1&ppos=1&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>"},
+			},
+		},
+	)
+	// Append Mid-rolls
+	midRoll := 1
+	for i := 0; i < len(record.Timeline); i++ {
+		if _, ok := record.Timeline[i].(structs.TimelineNode); ok {
+			field := record.Timeline[i].(structs.TimelineNode).Type
+			time := record.Timeline[i].(structs.TimelineNode).Time
+			amount := record.Timeline[i].(structs.TimelineNode).Amount
+			if field == "ad-marker" {
+				for j := 0; j < amount; j++ {
+					midRollNum := j + 1
+					adBreaks = append(adBreaks,
+						AdBreak{xml.Name{}, resolveSecondsToReadableAdTimeFormat(time), "linear", "midroll-" + strconv.Itoa(midRoll),
+							AdSource{xml.Name{}, "midroll-" + strconv.Itoa(midRoll) + "-ad-" + strconv.Itoa(midRollNum), "false", "true",
+								AdTagUri{xml.Name{}, "vast3", "<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&cue=15000&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=midroll&pod=2&mridx=1&rmridx=1&ppos=1&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>"},
+							},
+						},
+					)
+				}
+				midRoll = midRoll + 1
+			}
+		}
+
+	}
+	// Append Post-roll
+	adBreaks = append(adBreaks,
+		AdBreak{xml.Name{}, "end", "linear", "postroll",
+			AdSource{xml.Name{}, "postroll-ad-1", "false", "true",
+				AdTagUri{xml.Name{}, "vast3", "<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=postroll&pod=3&ppos=1&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>"},
+			},
+		},
+	)
+	// iterate through adbreaks and ad each midroll (2 midroll ads each)
 	response := Vmap{
 		xml.Name{},
 		"http://www.iab.net/videosuite/vmap",
 		"1.0",
-		[]AdBreak{
-			{xml.Name{}, "start", "linear", "preroll",
-				AdSource{xml.Name{}, "preroll-ad-1", "false", "true"},
-			},
-			{xml.Name{}, "00:00:15", "linear", "midroll-1",
-				AdSource{xml.Name{}, "midroll-1-ad-1", "false", "true"},
-			},
-		},
+		adBreaks,
 	}
 
 	x, err := xml.MarshalIndent(response, "", " ")
@@ -282,52 +342,21 @@ func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 	return []byte(x), nil
 }
 
-// func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
-// 	var tmpl string = `<vmap:VMAP xmlns:vmap="http://www.iab.net/videosuite/vmap" name,attr version="1.0">
-// 	<vmap:AdBreak timeOffset="start" breakType="linear" breakId="preroll">
-// 		<vmap:AdSource id="preroll-ad-1" allowMultipleAds="false" followRedirects="true">
-// 			<vmap:AdTagURI templateType="vast3">
-// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=preroll&pod=1&ppos=1&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
-// 			</vmap:AdTagURI>
-// 		</vmap:AdSource>
-// 	</vmap:AdBreak>
-// 	<vmap:AdBreak timeOffset="00:00:15.000" breakType="linear" breakId="midroll-1">
-// 		<vmap:AdSource id="midroll-1-ad-1" allowMultipleAds="false" followRedirects="true">
-// 			<vmap:AdTagURI templateType="vast3">
-// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&cue=15000&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=midroll&pod=2&mridx=1&rmridx=1&ppos=1&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
-// 			</vmap:AdTagURI>
-// 		</vmap:AdSource>
-// 	</vmap:AdBreak>
-// 	<vmap:AdBreak timeOffset="00:00:15.000" breakType="linear" breakId="midroll-1">
-// 		<vmap:AdSource id="midroll-1-ad-2" allowMultipleAds="false" followRedirects="true">
-// 			<vmap:AdTagURI templateType="vast3">
-// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&cue=15000&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=midroll&pod=2&mridx=1&rmridx=1&ppos=2&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
-// 			</vmap:AdTagURI>
-// 		</vmap:AdSource>
-// 	</vmap:AdBreak>
-// 	<vmap:AdBreak timeOffset="00:00:15.000" breakType="linear" breakId="midroll-1">
-// 		<vmap:AdSource id="midroll-1-ad-3" allowMultipleAds="false" followRedirects="true">
-// 			<vmap:AdTagURI templateType="vast3">
-// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&cue=15000&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=midroll&pod=2&mridx=1&rmridx=1&ppos=3&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
-// 			</vmap:AdTagURI>
-// 		</vmap:AdSource>
-// 	</vmap:AdBreak>
-// 	<vmap:AdBreak timeOffset="end" breakType="linear" breakId="postroll">
-// 		<vmap:AdSource id="postroll-ad-1" allowMultipleAds="false" followRedirects="true">
-// 			<vmap:AdTagURI templateType="vast3">
-// 				<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=postroll&pod=3&ppos=1&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>
-// 			</vmap:AdTagURI>
-// 		</vmap:AdSource>
-// 	</vmap:AdBreak>
-// </vmap:VMAP>
-// `
-// 	// if err := xml.Unmarshal([]byte(tmpl), s); err != nil {
-// 	// 	fmt.Printf("Err Marshalling %v", err)
-// 	// }
-// 	m := map[string]string{"vmap:name xmlns:vmap=\"http://www.iab.net/videosuite/vmap\" version=\"1.0\"": tmpl}
-// 	output, _ := xml.MarshalIndent(StringMap(m), "", " ")
-// 	return output, nil
-// }
+func GenerateMockTimeline(duration int) []interface{} {
+	minutes := 5
+	requiredRolls := (duration / 60) / minutes
+	curTime := 300 // 5 minutes start time, dont start at pre roll
+	timeline := make([]interface{}, requiredRolls)
+	for i := 0; i < requiredRolls; i++ {
+		timeline = append(timeline, structs.TimelineNode{
+			Type:   "ad-marker",
+			Amount: 2,
+			Time:   curTime,
+		})
+		curTime += 300
+	}
+	return timeline
+}
 
 func UploadVastS3(fileName string) (string, error) {
 	fmt.Printf("%v, %v", fileName, vastUploadFolderPath)
@@ -396,4 +425,35 @@ func DeleteFile(stale string, dir string) error {
 		fmt.Printf("Error deleting Err: %v. File: %v\n", err, path)
 	}
 	return nil
+}
+
+func resolveSecondsToReadableAdTimeFormat(duration int) string {
+	var hours int = duration / 3600
+	var minutes int = (duration - (hours * 3600)) / 60
+	var seconds int = (duration - ((hours * 3600) + (minutes * 60)))
+	return strconv.Itoa(hours) + ":" + strconv.Itoa(minutes) + ":" + strconv.Itoa(seconds)
+}
+
+func resolveValidAdsMidRolls(r *http.Request) []structs.AdUnit {
+	// Find all valid mid rolls/ads from AdUnits table
+	var records []structs.AdUnit
+	if client != nil {
+		adUnits := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("adunits")
+		cursor, err := adUnits.Find(context.TODO(), bson.D{{"publish", true}}) // Get from video data
+		if err != nil {
+			fmt.Printf("Err %v", err)
+			return records
+		} else {
+			fmt.Printf("Cursor %v", cursor.ID())
+			for cursor.Next(context.TODO()) {
+				var result structs.AdUnit
+				if err := cursor.Decode(&result); err != nil {
+					fmt.Printf("Error %v", err)
+					return records
+				}
+				records = append(records, result)
+			}
+		}
+	}
+	return records
 }
