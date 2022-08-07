@@ -108,6 +108,15 @@ func returnRawJsonBytes() []byte {
         },
         "googleOAuth": {
             "clientId": "169701902623-9a74mqcbqr38uj87qm8tm3190cicaa7m.apps.googleusercontent.com"
+        },
+        "dev": {
+            "auth": "auth891for019dev000env",
+            "tycoonSystemsVideo1": "https://d2wj75ner94uq0.cloudfront.net",
+            "tycoonSystemsAds1": "https://d266bcgu84hcve.cloudfront.net"
+        },
+        "prod": {
+            "tycoonSystemsVideo1": "https://d1qvcd9vvgazlp.cloudfront.net",
+            "tycoonSystemsAds1": "https://d3mc900e7ry112.cloudfront.net"
         }
     }`)
 	return jsonData

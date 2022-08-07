@@ -137,3 +137,9 @@ type AdHistoryItem struct {
 	DailyBudget       string
 	AdvertEndTime     string
 }
+
+/* Misc */
+
+type Origin struct {
+	Name string
+}

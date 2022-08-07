@@ -34,6 +34,10 @@ const (
 	adServerPort = ":6010"
 )
 
+var (
+	supportedAdOrigins = []structs.Origin{{"https://www.tycoon.systems"}, {"www.tycoon.systems"}, {"https://imasdk.googleapis.com"}, {"imasdk.googleapis.com"}, {"http://localhost:3000"}, {"localhost:3000"}}
+)
+
 type SmsManagementServer struct {
 	pb.UnimplementedSmsManagementServer
 }
@@ -140,6 +144,7 @@ func main() {
 
 func serveAdCompliantServer() *http.Server {
 	http.HandleFunc("/ads/vmap", handleAdRequests)
+	http.HandleFunc("/ads/vast", handleAdVastRequests)
 	log.Printf("Ad Compliant Server listening at %v", adServerPort)
 	err := http.ListenAndServe(adServerPort, nil)
 	if err != nil {
@@ -148,23 +153,36 @@ func serveAdCompliantServer() *http.Server {
 	return &http.Server{}
 }
 
-type Origin struct {
-	Name string
+func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWriter) {
+	origin := r.Header.Get("Origin")
+	for i := range supportedAdOrigins {
+		if supportedAdOrigins[i].Name == origin {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			return true, w
+		}
+	}
+	return false, w
+}
+
+func handleAdVastRequests(w http.ResponseWriter, r *http.Request) {
+	match, w := matchOrigin(w, r)
+	if match == false {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
+
+	vmap, err := ad_queue.GenerateAndServeVast(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
+	w.Write(vmap)
 }
 
 func handleAdRequests(w http.ResponseWriter, r *http.Request) {
-	// log.Printf("%v", r)
-	origin := r.Header.Get("Origin")
-	supportedOrigins := []Origin{{"https://www.tycoon.systems"}, {"www.tycoon.systems"}, {"https://imasdk.googleapis.com"}, {"imasdk.googleapis.com"}, {"http://localhost:3000"}, {"localhost:3000"}}
-	match := false
-
-	for i := range supportedOrigins {
-		if supportedOrigins[i].Name == origin {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			match = true
-			break
-		}
-	}
+	match, w := matchOrigin(w, r)
 	if match == false {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 	}

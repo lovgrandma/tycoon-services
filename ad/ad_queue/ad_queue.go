@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"reflect"
 	"strconv"
 
@@ -50,6 +51,7 @@ var (
 	devEnv               = s3credentials.GetS3Data("app", "dev", "")
 	adServerEndPoint     = s3credentials.GetS3Data("app", "server", "")
 	adServerPort         = s3credentials.GetS3Data("app", "adServerPort", "")
+	videoCdn             = s3credentials.GetS3Data("prod", "tycoonSystemsVideo1", "")
 )
 
 const (
@@ -286,16 +288,26 @@ func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 		record.Timeline = GenerateMockTimeline(duration) // Generate timeline to iterate through ad points
 	}
 	validMidRolls := resolveValidAdsMidRolls(r)
-	fmt.Printf("Rolls %v", validMidRolls)
 	var adBreaks []AdBreak
+	protocol := "https://"
+	root := adServerEndPoint
+	if devEnv == "true" {
+		protocol = "http://"
+		root = "localhost"
+	}
 	// Append Pre-roll
-	adBreaks = append(adBreaks,
-		AdBreak{xml.Name{}, "start", "linear", "preroll",
-			AdSource{xml.Name{}, "preroll-ad-1", "false", "true",
-				AdTagUri{xml.Name{}, "vast3", "<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=preroll&pod=1&ppos=1&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>"},
+	singleAd, n := resolveSingleAd(r, validMidRolls)
+	var vastQueryParams string
+	if n != -1 {
+		vastQueryParams = generateVastQueryParameters(r, singleAd)
+		adBreaks = append(adBreaks,
+			AdBreak{xml.Name{}, "start", "linear", "preroll",
+				AdSource{xml.Name{}, "preroll-ad-1", "false", "true",
+					AdTagUri{xml.Name{}, "vast3", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/vast" + vastQueryParams + " ]]>"},
+				},
 			},
-		},
-	)
+		)
+	}
 	// Append Mid-rolls
 	midRoll := 1
 	for i := 0; i < len(record.Timeline); i++ {
@@ -303,16 +315,24 @@ func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 			field := record.Timeline[i].(structs.TimelineNode).Type
 			time := record.Timeline[i].(structs.TimelineNode).Time
 			amount := record.Timeline[i].(structs.TimelineNode).Amount
+			validAdsCopy := make([]structs.AdUnit, len(validMidRolls))
+			copy(validAdsCopy, validMidRolls)
 			if field == "ad-marker" {
 				for j := 0; j < amount; j++ {
 					midRollNum := j + 1
-					adBreaks = append(adBreaks,
-						AdBreak{xml.Name{}, resolveSecondsToReadableAdTimeFormat(time), "linear", "midroll-" + strconv.Itoa(midRoll),
-							AdSource{xml.Name{}, "midroll-" + strconv.Itoa(midRoll) + "-ad-" + strconv.Itoa(midRollNum), "false", "true",
-								AdTagUri{xml.Name{}, "vast3", "<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&cue=15000&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=midroll&pod=2&mridx=1&rmridx=1&ppos=1&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>"},
+					useAd, n2 := resolveSingleAd(r, validAdsCopy)
+					fmt.Printf("%v", validAdsCopy)
+					if n2 != -1 {
+						validAdsCopy = removeAdAtIndex(validAdsCopy, n)
+						vastQueryParams = generateVastQueryParameters(r, useAd)
+						adBreaks = append(adBreaks,
+							AdBreak{xml.Name{}, resolveSecondsToReadableAdTimeFormat(time), "linear", "midroll-" + strconv.Itoa(midRoll),
+								AdSource{xml.Name{}, "midroll-" + strconv.Itoa(midRoll) + "-ad-" + strconv.Itoa(midRollNum), "false", "true",
+									AdTagUri{xml.Name{}, "vast3", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/vast" + vastQueryParams + " ]]>"},
+								},
 							},
-						},
-					)
+						)
+					}
 				}
 				midRoll = midRoll + 1
 			}
@@ -320,13 +340,17 @@ func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 
 	}
 	// Append Post-roll
-	adBreaks = append(adBreaks,
-		AdBreak{xml.Name{}, "end", "linear", "postroll",
-			AdSource{xml.Name{}, "postroll-ad-1", "false", "true",
-				AdTagUri{xml.Name{}, "vast3", "<![CDATA[ https://pubads.g.doubleclick.net/gampad/ads?slotname=/21775744923/external/vmap_ad_samples&sz=640x480&ciu_szs=300x250&cust_params=sample_ar%3Dpremidpostpod&url=&unviewed_position_start=1&output=xml_vast3&impl=s&env=vp&gdfp_req=1&ad_rule=0&useragent=Mozilla/5.0+(Windows+NT+10.0%3B+Win64%3B+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/103.0.0.0+Safari/537.36,gzip(gfe)&vad_type=linear&vpos=postroll&pod=3&ppos=1&lip=true&min_ad_duration=0&max_ad_duration=30000&vrid=1270234&cmsid=496&video_doc_id=short_onecue&kfa=0&tfcd=0 ]]>"},
+	singlePostAd, n3 := resolveSingleAd(r, validMidRolls)
+	if n3 != -1 {
+		vastQueryParams = generateVastQueryParameters(r, singlePostAd)
+		adBreaks = append(adBreaks,
+			AdBreak{xml.Name{}, "end", "linear", "postroll",
+				AdSource{xml.Name{}, "postroll-ad-1", "false", "true",
+					AdTagUri{xml.Name{}, "vast3", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/vast" + vastQueryParams + " ]]>"},
+				},
 			},
-		},
-	)
+		)
+	}
 	// iterate through adbreaks and ad each midroll (2 midroll ads each)
 	response := Vmap{
 		xml.Name{},
@@ -335,6 +359,177 @@ func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 		adBreaks,
 	}
 
+	x, err := xml.MarshalIndent(response, "", " ")
+	if err != nil {
+		return nil, err
+	}
+	return []byte(x), nil
+}
+
+type Vast struct {
+	XMLName                   xml.Name `xml:"Vast"`
+	VastAttr                  string   `xml:"xmlns:xsi,attr"`
+	NoNamespaceSchemaLocation string   `xml:"xsi:noNamespaceSchemaLocation,attr"`
+	Version                   string   `xml:"version,attr"`
+	AdElement                 AdElement
+}
+
+type AdElement struct {
+	XMLName xml.Name `xml:"Ad"`
+	IdAttr  string   `xml:"id,attr"`
+	InLine  InLineElement
+}
+
+type InLineElement struct {
+	XMLName     xml.Name `xml:"Inline"`
+	AdSystem    string   `xml:"AdSystem"`
+	AdTitle     string   `xml:"AdTitle"`
+	Description string   `xml:"Description"`
+	Error       string   `xml:"Error"`
+	Impression  string   `xml:"Impression"`
+	Creatives   CreativesElement
+}
+
+type CreativesElement struct {
+	XMLName  xml.Name `xml:"Creatives"`
+	Creative []CreativeElement
+}
+
+type CreativeElement struct {
+	XMLName      xml.Name `xml:"Creative"`
+	IdAttr       string   `xml:"id,attr"`
+	AdIdAttr     string   `xml:"AdID,attr"`
+	SequenceAttr string   `xml:"sequence,attr"`
+	Linear       LinearElement
+}
+
+type LinearElement struct {
+	XMLName        xml.Name `xml:"Linear"`
+	Duration       string   `xml:"Duration"`
+	TrackingEvents TrackingEventsElement
+	VideoClicks    VideoClicksElement
+	MediaFiles     MediaFilesElement
+}
+
+type TrackingEventsElement struct {
+	XMLName       xml.Name `xml:"TrackingEvents"`
+	TrackingEvent []TrackingEventElement
+}
+
+type TrackingEventElement struct {
+	XMLName   xml.Name `xml:"Tracking"`
+	EventAttr string   `xml:"event,attr"`
+	Url       string   `xml:",innerxml"`
+}
+
+type VideoClicksElement struct {
+	XMLName      xml.Name `xml:"VideoClicks"`
+	ClickThrough ClickThroughElement
+}
+
+type ClickThroughElement struct {
+	XMLName xml.Name `xml:"ClickThrough"`
+	IdAttr  string   `xml:"id,attr"`
+	Url     string   `xml:",innerxml"`
+}
+
+type MediaFilesElement struct {
+	XMLName   xml.Name `xml:"MediaFiles"`
+	MediaFile []MediaFileElement
+}
+
+type MediaFileElement struct {
+	XMLName                 xml.Name `xml:"MediaFile"`
+	IdAttr                  string   `xml:"id,attr"`
+	DeliveryAttr            string   `xml:"delivery,attr"`
+	WidthAttr               string   `xml:"width,attr"`
+	HeightAttr              string   `xml:"height,attr"`
+	TypeAttr                string   `xml:"type,attr"`
+	MinBitrateAttr          string   `xml:"minBitrate,attr"`
+	MaxBitrateAttr          string   `xml:"maxBitrate,attr"`
+	ScalableAttr            string   `xml:"scalable,attr"`
+	MaintainAspectRatioAttr string   `xml:"maintainAspectRatio,attr"`
+	Url                     string   `xml:",innerxml"`
+}
+
+func GenerateAndServeVast(r *http.Request) ([]byte, error) {
+	id := r.URL.Query().Get("id")
+	documentId := r.URL.Query().Get("document")
+	protocol := "https://"
+	root := adServerEndPoint
+	if devEnv == "true" {
+		protocol = "http://"
+		root = "localhost"
+		videoCdn = s3credentials.GetS3Data("dev", "tycoonSystemsVideo1", "")
+	}
+	record := &structs.AdUnit{}
+	playRecord := &structs.Video{}
+	if client != nil {
+		adUnits := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("adunits")
+		adUnits.FindOne(context.TODO(), bson.D{{"_id", id}}).Decode(&record) // Get from phone number data
+		videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
+		videos.FindOne(context.TODO(), bson.D{{"_id", documentId}}).Decode(&playRecord)
+	}
+	vastQueryParams := generateVastQueryParameters(r, *record)
+	response := Vast{
+		xml.Name{},
+		"http://www.w3.org/2001/XMLSchema-instance",
+		"vast.xsd",
+		"3.0",
+		AdElement{
+			xml.Name{},
+			id,
+			InLineElement{
+				xml.Name{},
+				"Tycoon",
+				record.AdTitle,
+				"<![CDATA[ " + record.AdDescription + " ]]>",
+				"<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/error" + vastQueryParams + " ]]>",
+				"<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/view" + vastQueryParams + " ]]>",
+				CreativesElement{
+					xml.Name{},
+					[]CreativeElement{
+						{
+							xml.Name{},
+							record.DocumentId,
+							record.ID,
+							"1",
+							LinearElement{
+								xml.Name{},
+								resolveSecondsToReadableAdTimeFormat(playRecord.Duration),
+								TrackingEventsElement{
+									xml.Name{},
+									[]TrackingEventElement{
+										{xml.Name{}, "start", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=start ]]>"},
+										{xml.Name{}, "firstQuartile", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=firstquartile ]]>"},
+										{xml.Name{}, "midpoint", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=midpoint ]]>"},
+										{xml.Name{}, "thirdQuartile", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=thirdquartile ]]>"},
+										{xml.Name{}, "complete", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=complete ]]>"},
+										{xml.Name{}, "pause", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=pause ]]>"},
+										{xml.Name{}, "mute", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=mute ]]>"},
+										{xml.Name{}, "fullscreen", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=fullscreen ]]>"},
+										{xml.Name{}, "acceptInvitationLinear", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=acceptinvitationlinear ]]>"},
+										{xml.Name{}, "closeLinear", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=closelinear ]]>"},
+									},
+								},
+								VideoClicksElement{
+									xml.Name{},
+									ClickThroughElement{xml.Name{}, "Tycoon", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/click" + vastQueryParams + " ]]>"},
+								},
+								MediaFilesElement{
+									xml.Name{},
+									[]MediaFileElement{
+										{xml.Name{}, record.DocumentId + "-hls", "streaming", "426", "240", "application/x-mpegURL", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Hls + " ]]>"},
+										{xml.Name{}, record.DocumentId + "-mpd", "streaming", "426", "240", "application/dash+xml", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Mpd + " ]]>"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 	x, err := xml.MarshalIndent(response, "", " ")
 	if err != nil {
 		return nil, err
@@ -456,4 +651,28 @@ func resolveValidAdsMidRolls(r *http.Request) []structs.AdUnit {
 		}
 	}
 	return records
+}
+
+func resolveSingleAd(r *http.Request, adUnits []structs.AdUnit) (structs.AdUnit, int) {
+	if len(adUnits) > 0 {
+		var random int = rand.Intn(len(adUnits))
+		if reflect.TypeOf(adUnits[random]).Kind() == reflect.TypeOf(structs.AdUnit{}).Kind() {
+			return adUnits[random], random
+		}
+	}
+	return structs.AdUnit{}, -1
+}
+
+func generateVastQueryParameters(r *http.Request, adUnit structs.AdUnit) string {
+	params := "?"
+	params = params + "id=" + adUnit.ID
+	params = params + "&type=" + adUnit.AdType
+	params = params + "&document=" + adUnit.DocumentId
+	return params
+}
+
+func removeAdAtIndex(a []structs.AdUnit, i int) []structs.AdUnit {
+	t := make([]structs.AdUnit, 0)
+	t = append(t, a[:i]...)
+	return append(t, a[i+1:]...)
 }
