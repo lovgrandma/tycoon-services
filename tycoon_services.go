@@ -35,7 +35,7 @@ const (
 )
 
 var (
-	supportedAdOrigins = []structs.Origin{{"https://www.tycoon.systems"}, {"www.tycoon.systems"}, {"https://imasdk.googleapis.com"}, {"imasdk.googleapis.com"}, {"http://localhost:3000"}, {"localhost:3000"}}
+	supportedAdOrigins = []structs.Origin{{"https://www.tycoon.systems"}, {"www.tycoon.systems"}, {"https://imasdk.googleapis.com"}, {"imasdk.googleapis.com"}, {"http://localhost:3000"}, {"localhost:3000"}, {"https://tycoon-systems-client.local:3000"}, {"tycoon-systems-client.local:3000"}, {"https://tycoon-systems-client.local"}, {"tycoon-systems-client.local"}}
 )
 
 type SmsManagementServer struct {
@@ -50,7 +50,7 @@ type AdManagementServer struct {
 	adpb.UnimplementedAdManagementServer
 }
 
-func (a *AdManagementServer) CreateNewAdVast(ctx context.Context, in *adpb.NewVast) (*adpb.Vast, error) {
+func (a *AdManagementServer) CreateNewVastCompliantAdVideoJob(ctx context.Context, in *adpb.NewVast) (*adpb.Vast, error) {
 	if reflect.TypeOf(in.GetIdentifier()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetDocumentId()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetUsername()).Kind() == reflect.String &&
@@ -61,10 +61,10 @@ func (a *AdManagementServer) CreateNewAdVast(ctx context.Context, in *adpb.NewVa
 		reflect.TypeOf(in.GetAdTitle()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetClickthroughUrl()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetCallToAction()).Kind() == reflect.String {
-		if len(in.GetIdentifier()) > 0 && len(in.GetUsername()) > 0 && len(in.GetSocket()) > 0 && len(in.GetUuid()) > 0 && len(in.GetHash()) > 0 && len(in.GetTrackingUrl()) > 0 && len(in.GetAdTitle()) > 0 && len(in.GetClickthroughUrl()) > 0 && len(in.GetCallToAction()) > 0 {
+		if len(in.GetIdentifier()) > 0 && len(in.GetUsername()) > 0 && len(in.GetSocket()) > 0 && len(in.GetUuid()) > 0 && len(in.GetHash()) > 0 && len(in.GetTrackingUrl()) > 0 && len(in.GetAdTitle()) > 0 && len(in.GetClickthroughUrl()) > 0 && len(in.GetStartTime()) > 0 && len(in.GetEndTime()) > 0 && len(in.GetPlayTime()) > 0 {
 			var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash()) // Access mongo and check user identifier against hash to determine if request should be honoured
 			if authenticated != false {
-				jobProvisioned := ad_queue.ProvisionVastJob(structs.VastTag{ID: in.GetUuid(), Socket: in.GetIdentifier(), Status: "Pending", Url: "", DocumentId: in.GetDocumentId(), TrackingUrl: in.GetTrackingUrl(), AdTitle: in.GetAdTitle(), ClickthroughUrl: in.GetClickthroughUrl(), CallToAction: in.GetCallToAction()})
+				jobProvisioned := ad_queue.ProvisionCreateNewVastCompliantAdVideoJob(structs.VastTag{ID: in.GetUuid(), Socket: in.GetIdentifier(), Status: "Pending", Url: "", DocumentId: in.GetDocumentId(), TrackingUrl: in.GetTrackingUrl(), AdTitle: in.GetAdTitle(), ClickthroughUrl: in.GetClickthroughUrl(), CallToAction: in.GetCallToAction(), StartTime: in.GetStartTime(), EndTime: in.GetEndTime(), PlayTime: in.GetPlayTime()})
 				if jobProvisioned != "failed" {
 					return &adpb.Vast{Status: "Good", ID: in.GetUuid(), Socket: in.GetIdentifier()}, nil
 				}
@@ -145,6 +145,7 @@ func main() {
 func serveAdCompliantServer() *http.Server {
 	http.HandleFunc("/ads/vmap", handleAdRequests)
 	http.HandleFunc("/ads/vast", handleAdVastRequests)
+	http.HandleFunc("/ads/error", handleAdErrorRequests)
 	log.Printf("Ad Compliant Server listening at %v", adServerPort)
 	err := http.ListenAndServe(adServerPort, nil)
 	if err != nil {
@@ -155,6 +156,7 @@ func serveAdCompliantServer() *http.Server {
 
 func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWriter) {
 	origin := r.Header.Get("Origin")
+	log.Printf("Origin %v", origin)
 	for i := range supportedAdOrigins {
 		if supportedAdOrigins[i].Name == origin {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -162,6 +164,21 @@ func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWri
 		}
 	}
 	return false, w
+}
+
+func handleAdErrorRequests(w http.ResponseWriter, r *http.Request) {
+	f := r.URL.Query().Get("videoplayfailed")
+	log.Printf("Ad Failure %v", f)
+	match, w := matchOrigin(w, r)
+	w.WriteHeader(http.StatusOK)
+	if match == false {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
+
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
+	w.Header().Set("Content-Type", "application/text")
+	w.Write([]byte("Success"))
+	return
 }
 
 func handleAdVastRequests(w http.ResponseWriter, r *http.Request) {

@@ -106,6 +106,9 @@ type VastTag struct {
 	AdTitle         string
 	ClickthroughUrl string
 	CallToAction    string
+	StartTime       string
+	EndTime         string
+	PlayTime        string
 }
 
 type AdUnit struct {

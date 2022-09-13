@@ -22,7 +22,7 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AdManagementClient interface {
-	CreateNewAdVast(ctx context.Context, in *NewVast, opts ...grpc.CallOption) (*Vast, error)
+	CreateNewVastCompliantAdVideoJob(ctx context.Context, in *NewVast, opts ...grpc.CallOption) (*Vast, error)
 	ReturnVastJobResult(ctx context.Context, in *Vast, opts ...grpc.CallOption) (*Vast, error)
 }
 
@@ -34,9 +34,9 @@ func NewAdManagementClient(cc grpc.ClientConnInterface) AdManagementClient {
 	return &adManagementClient{cc}
 }
 
-func (c *adManagementClient) CreateNewAdVast(ctx context.Context, in *NewVast, opts ...grpc.CallOption) (*Vast, error) {
+func (c *adManagementClient) CreateNewVastCompliantAdVideoJob(ctx context.Context, in *NewVast, opts ...grpc.CallOption) (*Vast, error) {
 	out := new(Vast)
-	err := c.cc.Invoke(ctx, "/ad.adManagement/CreateNewAdVast", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/ad.adManagement/CreateNewVastCompliantAdVideoJob", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (c *adManagementClient) ReturnVastJobResult(ctx context.Context, in *Vast, 
 // All implementations must embed UnimplementedAdManagementServer
 // for forward compatibility
 type AdManagementServer interface {
-	CreateNewAdVast(context.Context, *NewVast) (*Vast, error)
+	CreateNewVastCompliantAdVideoJob(context.Context, *NewVast) (*Vast, error)
 	ReturnVastJobResult(context.Context, *Vast) (*Vast, error)
 	mustEmbedUnimplementedAdManagementServer()
 }
@@ -65,8 +65,8 @@ type AdManagementServer interface {
 type UnimplementedAdManagementServer struct {
 }
 
-func (UnimplementedAdManagementServer) CreateNewAdVast(context.Context, *NewVast) (*Vast, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateNewAdVast not implemented")
+func (UnimplementedAdManagementServer) CreateNewVastCompliantAdVideoJob(context.Context, *NewVast) (*Vast, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateNewVastCompliantAdVideoJob not implemented")
 }
 func (UnimplementedAdManagementServer) ReturnVastJobResult(context.Context, *Vast) (*Vast, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReturnVastJobResult not implemented")
@@ -84,20 +84,20 @@ func RegisterAdManagementServer(s grpc.ServiceRegistrar, srv AdManagementServer)
 	s.RegisterService(&AdManagement_ServiceDesc, srv)
 }
 
-func _AdManagement_CreateNewAdVast_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _AdManagement_CreateNewVastCompliantAdVideoJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(NewVast)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AdManagementServer).CreateNewAdVast(ctx, in)
+		return srv.(AdManagementServer).CreateNewVastCompliantAdVideoJob(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/ad.adManagement/CreateNewAdVast",
+		FullMethod: "/ad.adManagement/CreateNewVastCompliantAdVideoJob",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AdManagementServer).CreateNewAdVast(ctx, req.(*NewVast))
+		return srv.(AdManagementServer).CreateNewVastCompliantAdVideoJob(ctx, req.(*NewVast))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -128,8 +128,8 @@ var AdManagement_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*AdManagementServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "CreateNewAdVast",
-			Handler:    _AdManagement_CreateNewAdVast_Handler,
+			MethodName: "CreateNewVastCompliantAdVideoJob",
+			Handler:    _AdManagement_CreateNewVastCompliantAdVideoJob_Handler,
 		},
 		{
 			MethodName: "returnVastJobResult",

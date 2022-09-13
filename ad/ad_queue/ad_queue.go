@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"reflect"
+	"regexp"
 	"strconv"
 
 	"html/template"
@@ -46,8 +48,9 @@ var (
 	jobClient            = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
 	returnJobResultPort  = "6005"
 	returnJobResultAddr  = s3credentials.GetS3Data("app", "prodhost", "")
-	vastUploadFolderPath = "../tycoon-services-vast-generation/"
-	s3VideoEndpoint      = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-ads")
+	vastUploadFolderPath = "../tycoon-services-vast-ad-generation/"
+	s3VideoEndpoint      = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-video")
+	s3VideoAdEndpoint    = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-ads")
 	devEnv               = s3credentials.GetS3Data("app", "dev", "")
 	adServerEndPoint     = s3credentials.GetS3Data("app", "server", "")
 	adServerPort         = s3credentials.GetS3Data("app", "adServerPort", "")
@@ -56,16 +59,16 @@ var (
 
 const (
 	TypeVastGenerate           = "vast:generate"
-	_vastAlreadyGeneratedCheck = "Vast has already been generated"
+	_vastAlreadyGeneratedCheck = "Vast Video has already been generated"
 )
 
 func main() {
 
 }
 
-func ProvisionVastJob(vast structs.VastTag) string {
+func ProvisionCreateNewVastCompliantAdVideoJob(vast structs.VastTag) string {
 	if reflect.TypeOf(vast.ID).Kind() == reflect.String {
-		task, err := NewVastDeliveryTask(vast)
+		task, err := NewCreateVastCompliantAdVideoTask(vast)
 		if err != nil {
 			log.Printf("Could not create Vast Generate task at Task Creation: %v", err)
 		}
@@ -84,7 +87,7 @@ func GetConnection() *mongo.Client {
 }
 
 // Build new delivery to be consumed by queue
-func NewVastDeliveryTask(vast structs.VastTag) (*asynq.Task, error) {
+func NewCreateVastCompliantAdVideoTask(vast structs.VastTag) (*asynq.Task, error) {
 	payload, err := json.Marshal(vast)
 	if err != nil {
 		return nil, err
@@ -93,39 +96,141 @@ func NewVastDeliveryTask(vast structs.VastTag) (*asynq.Task, error) {
 }
 
 // Unmarshal queued delivery task to determine if in correct format
-func HandleVastDeliveryTask(ctx context.Context, t *asynq.Task) error {
+func HandleCreateVastCompliantAdVideoTask(ctx context.Context, t *asynq.Task) error {
 	var p structs.VastTag
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
 		return fmt.Errorf("json.Unmarshal failed: %v: %w", err, asynq.SkipRetry)
 	}
 	log.Printf("Beginning VastTag Generation for ID: %v, Socket: %v", p.ID, p.Socket)
-	err := PerformVastGeneration(p)
+	err := PerformVastCompliantAdVideoGeneration(p)
 	if err != nil {
 		return fmt.Errorf("Perform VastTag Gemeration failed: %v: %w", err, asynq.SkipRetry)
 	}
 	return nil
 }
 
-func PerformVastGeneration(vast structs.VastTag) error {
-	fmt.Printf("Yes! %v, %v, %v, %v, %v, %v, %v, %v", vast.ID, vast.DocumentId, vast.Socket, vast.Status, vast.Url, vast.TrackingUrl, vast.AdTitle, vast.ClickthroughUrl)
-	f, err := GenerateVast(vast)
+func PerformVastCompliantAdVideoGeneration(vast structs.VastTag) error {
+	fmt.Printf("Video:  %v, %v, %v, %v, %v, %v, %v, %v, %v, %v, %v\n", vast.ID, vast.DocumentId, vast.Socket, vast.Status, vast.Url, vast.TrackingUrl, vast.AdTitle, vast.ClickthroughUrl, vast.StartTime, vast.EndTime, vast.PlayTime)
+
+	// get location of highest resolution file 1080 -> 720 -> 540 -> 360. If nothing higher than 360 fail
+	videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
+	record := &structs.Video{}
+	err := videos.FindOne(context.TODO(), bson.D{{"_id", vast.DocumentId}}).Decode(&record) // Get from video data
 	if err != nil {
-		if len(f) > 0 {
-			DeleteFile(f, vastUploadFolderPath)
+		return fmt.Errorf("Get Video Failed")
+	}
+	fmt.Printf("Media %v", record.Media)
+	configResolutions := make([]string, 0)
+	configResolutions = append(configResolutions, "2048", "1440", "720", "540", "360", "240")
+	var highestResVideo string
+	var adAudio string
+	for i := 0; i < len(configResolutions); i++ {
+		if len(highestResVideo) == 0 {
+			for j := 0; j < len(record.Media); j++ {
+				f, _ := regexp.MatchString(configResolutions[i], record.Media[j].Url)
+				if f {
+					highestResVideo = record.Media[j].Url
+					break
+				}
+			}
 		}
-		return err
 	}
-	var url string
-	url, err = UploadVastS3(f)
+	for i := 0; i < len(record.Media); i++ {
+		f, _ := regexp.MatchString("audio", record.Media[i].Url)
+		if f {
+			adAudio = record.Media[i].Url
+			break
+		}
+	}
+	log.Printf("Highest Res Video Found %v Audio Found %v", highestResVideo, adAudio)
+
+	// download video and audio to local from s3
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion(s3credentials.GetS3Data("awsConfig", "mediaBucketLocation1", "")),
+		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
+			Value: aws.Credentials{
+				AccessKeyID:     s3credentials.GetS3Data("awsConfig", "accessKeyId", ""),
+				SecretAccessKey: s3credentials.GetS3Data("awsConfig", "secretAccessKey", ""),
+			},
+		}),
+	)
 	if err != nil {
-		DeleteFile(f, vastUploadFolderPath)
+		log.Printf("err %v", err)
 		return err
-	} else if len(url) == 0 {
-		DeleteFile(f, vastUploadFolderPath)
-		return fmt.Errorf("Error uploading VastTag to S3. No url from UploadVastS3 function")
 	}
-	UpdateRecord(url, vast.ID)
-	DeleteFile(f, vastUploadFolderPath)
+	client := s3.NewFromConfig(cfg)
+	downloader := manager.NewDownloader(client)
+	if devEnv == "true" {
+		s3VideoEndpoint = s3credentials.GetS3Data("awsConfig", "devBuckets", "tycoon-systems-video-development")
+		s3VideoAdEndpoint = s3credentials.GetS3Data("awsConfig", "devBuckets", "tycoon-systems-ads-development")
+	}
+	v1Endpoint := "video/" + highestResVideo
+	a1Endpoint := "video/" + adAudio
+	v1Input := s3.HeadObjectInput{
+		Bucket: aws.String(s3VideoEndpoint),
+		Key:    aws.String(v1Endpoint),
+	}
+	a1Input := s3.HeadObjectInput{
+		Bucket: aws.String(s3VideoEndpoint),
+		Key:    aws.String(a1Endpoint),
+	}
+	v1InputResult, err := client.HeadObject(context.TODO(), &v1Input)
+	if err != nil {
+		return err
+	}
+	a1InputResult, err := client.HeadObject(context.TODO(), &a1Input)
+	if err != nil {
+		log.Printf("err %v %v %v %v %v", err, s3VideoAdEndpoint, s3VideoEndpoint, v1Input, v1Endpoint)
+		return err
+	}
+	vBuf := make([]byte, int(v1InputResult.ContentLength))
+	aBuf := make([]byte, int(a1InputResult.ContentLength))
+	w := manager.NewWriteAtBuffer(vBuf)
+	w2 := manager.NewWriteAtBuffer(aBuf)
+	_, err = downloader.Download(context.TODO(), w, &s3.GetObjectInput{
+		Bucket: aws.String(s3VideoEndpoint),
+		Key:    aws.String(v1Endpoint),
+	})
+	_, err = downloader.Download(context.TODO(), w2, &s3.GetObjectInput{
+		Bucket: aws.String(s3VideoEndpoint),
+		Key:    aws.String(a1Endpoint),
+	})
+	err = ioutil.WriteFile(vastUploadFolderPath+vast.ID+"-720.mp4", vBuf, 0644)
+	if err != nil {
+		log.Printf("err %v", err)
+		return err
+	}
+	err = ioutil.WriteFile(vastUploadFolderPath+vast.ID+"-audio.mp4", aBuf, 0644)
+	if err != nil {
+		log.Printf("err %v", err)
+		return err
+	}
+
+	// generate video with "packed" audio based on starttime and endtime using ffmpeg
+
+	// upload to tycoon-systems-ads/video or tycoon-systems-ads-development/video
+	// store record on mongodb
+	// delete local files
+	// advise node.js server job is done, ad is in review
+
+	// f, err := GenerateVast(vast)
+	// if err != nil {
+	// 	if len(f) > 0 {
+	// 		DeleteFile(f, vastUploadFolderPath)
+	// 	}
+	// 	return err
+	// }
+	// var url string
+	// url, err = UploadVastS3(f)
+	// if err != nil {
+	// 	DeleteFile(f, vastUploadFolderPath)
+	// 	return err
+	// } else if len(url) == 0 {
+	// 	DeleteFile(f, vastUploadFolderPath)
+	// 	return fmt.Errorf("Error uploading VastTag to S3. No url from UploadVastS3 function")
+	// }
+	// UpdateRecord(url, vast.ID)
+	// DeleteFile(f, vastUploadFolderPath)
 	return nil
 }
 
@@ -258,9 +363,8 @@ func GetVideoDuration(document string) (int, error) {
 
 func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 	var document string = r.URL.Query().Get("document") // Get document id value
-	var docType string = r.URL.Query().Get("type")      // Get document type
-	duration, err := GetVideoDuration(document)         // Get duration to determine length of video for ad breaks
-	fmt.Printf("Duration, docType %v, %v,", docType, duration)
+	// var docType string = r.URL.Query().Get("type")      // Get document type
+	duration, err := GetVideoDuration(document) // Get duration to determine length of video for ad breaks
 	record := &structs.Video{}
 	if client != nil {
 		videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
@@ -300,6 +404,7 @@ func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 	var vastQueryParams string
 	if n != -1 {
 		vastQueryParams = generateVastQueryParameters(r, singleAd)
+		vastQueryParams = generateVmapQueryParameters(vastQueryParams, r, singleAd, true, "preroll")
 		adBreaks = append(adBreaks,
 			AdBreak{xml.Name{}, "start", "linear", "preroll",
 				AdSource{xml.Name{}, "preroll-ad-1", "false", "true",
@@ -321,10 +426,10 @@ func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 				for j := 0; j < amount; j++ {
 					midRollNum := j + 1
 					useAd, n2 := resolveSingleAd(r, validAdsCopy)
-					fmt.Printf("%v", validAdsCopy)
 					if n2 != -1 {
 						validAdsCopy = removeAdAtIndex(validAdsCopy, n)
 						vastQueryParams = generateVastQueryParameters(r, useAd)
+						vastQueryParams = generateVmapQueryParameters(vastQueryParams, r, singleAd, true, "midroll")
 						adBreaks = append(adBreaks,
 							AdBreak{xml.Name{}, resolveSecondsToReadableAdTimeFormat(time), "linear", "midroll-" + strconv.Itoa(midRoll),
 								AdSource{xml.Name{}, "midroll-" + strconv.Itoa(midRoll) + "-ad-" + strconv.Itoa(midRollNum), "false", "true",
@@ -343,6 +448,7 @@ func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 	singlePostAd, n3 := resolveSingleAd(r, validMidRolls)
 	if n3 != -1 {
 		vastQueryParams = generateVastQueryParameters(r, singlePostAd)
+		vastQueryParams = generateVmapQueryParameters(vastQueryParams, r, singleAd, true, "postroll")
 		adBreaks = append(adBreaks,
 			AdBreak{xml.Name{}, "end", "linear", "postroll",
 				AdSource{xml.Name{}, "postroll-ad-1", "false", "true",
@@ -367,11 +473,11 @@ func GenerateAndServeVmap(r *http.Request) ([]byte, error) {
 }
 
 type Vast struct {
-	XMLName                   xml.Name `xml:"Vast"`
-	VastAttr                  string   `xml:"xmlns:xsi,attr"`
-	NoNamespaceSchemaLocation string   `xml:"xsi:noNamespaceSchemaLocation,attr"`
-	Version                   string   `xml:"version,attr"`
-	AdElement                 AdElement
+	XMLName xml.Name `xml:"Vast"`
+	// VastAttr                  string   `xml:"xmlns:xsi,attr"`
+	// NoNamespaceSchemaLocation string   `xml:"xsi:noNamespaceSchemaLocation,attr"`
+	Version   string `xml:"version,attr"`
+	AdElement AdElement
 }
 
 type AdElement struct {
@@ -381,7 +487,7 @@ type AdElement struct {
 }
 
 type InLineElement struct {
-	XMLName     xml.Name `xml:"Inline"`
+	XMLName     xml.Name `xml:"InLine"`
 	AdSystem    string   `xml:"AdSystem"`
 	AdTitle     string   `xml:"AdTitle"`
 	Description string   `xml:"Description"`
@@ -391,8 +497,9 @@ type InLineElement struct {
 }
 
 type CreativesElement struct {
-	XMLName  xml.Name `xml:"Creatives"`
-	Creative []CreativeElement
+	XMLName           xml.Name `xml:"Creatives"`
+	Creative          []CreativeElement
+	CreativeCompanion []CreativeCompanionElement
 }
 
 type CreativeElement struct {
@@ -401,6 +508,32 @@ type CreativeElement struct {
 	AdIdAttr     string   `xml:"AdID,attr"`
 	SequenceAttr string   `xml:"sequence,attr"`
 	Linear       LinearElement
+}
+
+type CreativeCompanionElement struct {
+	XMLName      xml.Name `xml:"Creative"`
+	IdAttr       string   `xml:"id,attr"`
+	SequenceAttr string   `xml:"sequence,attr"`
+	CompanionAds CompanionAdsElement
+}
+
+type CompanionAdsElement struct {
+	XMLName   xml.Name `xml:"CompanionAds"`
+	Companion CompanionElement
+}
+
+type CompanionElement struct {
+	XMLName        xml.Name `xml:"Companion"`
+	IdAttr         string   `xml:"id,attr"`
+	WidthAttr      string   `xml:"width,attr"`
+	HeightAttr     string   `xml:"height,attr"`
+	StaticResource StaticResourceElement
+}
+
+type StaticResourceElement struct {
+	XMLName      xml.Name `xml:"StaticResource"`
+	CreativeType string   `xml:"creativeType,attr"`
+	Url          string   `xml:",innerxml"`
 }
 
 type LinearElement struct {
@@ -473,8 +606,6 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 	vastQueryParams := generateVastQueryParameters(r, *record)
 	response := Vast{
 		xml.Name{},
-		"http://www.w3.org/2001/XMLSchema-instance",
-		"vast.xsd",
 		"3.0",
 		AdElement{
 			xml.Name{},
@@ -484,7 +615,7 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 				"Tycoon",
 				record.AdTitle,
 				"<![CDATA[ " + record.AdDescription + " ]]>",
-				"<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/error" + vastQueryParams + " ]]>",
+				protocol + root + ":" + adServerPort + "/ads/error" + vastQueryParams + "&videoplayfailed=[ERRORCODE]&placebo=0",
 				"<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/view" + vastQueryParams + " ]]>",
 				CreativesElement{
 					xml.Name{},
@@ -514,13 +645,35 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 								},
 								VideoClicksElement{
 									xml.Name{},
-									ClickThroughElement{xml.Name{}, "Tycoon", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/click" + vastQueryParams + " ]]>"},
+									ClickThroughElement{xml.Name{}, "Tycoon", "<![CDATA[ " + record.ClickthroughUrl + " ]]>"},
 								},
 								MediaFilesElement{
 									xml.Name{},
 									[]MediaFileElement{
-										{xml.Name{}, record.DocumentId + "-hls", "streaming", "426", "240", "application/x-mpegURL", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Hls + " ]]>"},
-										{xml.Name{}, record.DocumentId + "-mpd", "streaming", "426", "240", "application/dash+xml", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Mpd + " ]]>"},
+										// {xml.Name{}, "Tycoon", "progressive", "426", "240", "video/mp4", "49", "258", "true", "true", "<![CDATA[ https://d2wj75ner94uq0.cloudfront.net/video/63fc01dc50af45988feac2208ff087ac-720.mp4 ]]>"},
+										{xml.Name{}, "Tycoon", "streaming", "426", "240", "application/x-mpegURL", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Hls + " ]]>"},
+										{xml.Name{}, "Tycoon", "streaming", "426", "240", "application/dash+xml", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Mpd + " ]]>"},
+									},
+								},
+							},
+						},
+					},
+					[]CreativeCompanionElement{
+						{
+							xml.Name{},
+							record.DocumentId,
+							"1",
+							CompanionAdsElement{
+								xml.Name{},
+								CompanionElement{
+									xml.Name{},
+									record.DocumentId,
+									"300",
+									"250",
+									StaticResourceElement{
+										xml.Name{},
+										"image/png",
+										"<![CDATA[ https://pagead2.googlesyndication.com/simgad/4446644594546952943 ]]>",
 									},
 								},
 							},
@@ -570,16 +723,16 @@ func UploadVastS3(fileName string) (string, error) {
 	client := s3.NewFromConfig(cfg)
 	uploader := manager.NewUploader(client)
 	if devEnv == "true" {
-		s3VideoEndpoint = s3credentials.GetS3Data("awsConfig", "devBuckets", "tycoon-systems-ads-development")
+		s3VideoAdEndpoint = s3credentials.GetS3Data("awsConfig", "devBuckets", "tycoon-systems-ads-development")
 	}
-	fmt.Printf("s3VideoEndpoint %v\n", s3VideoEndpoint)
+	fmt.Printf("s3VideoAdEndpoint %v\n", s3VideoAdEndpoint)
 	upFrom := vastUploadFolderPath
 	upTo := "vasttag/"
 	f, _ := os.Open(upFrom + fileName)
 	r := bufio.NewReader(f)
 	fmt.Printf("Uploading: %v %v\n", upFrom+fileName, upTo+fileName)
 	_, err = uploader.Upload(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(s3VideoEndpoint),
+		Bucket: aws.String(s3VideoAdEndpoint),
 		Key:    aws.String(upTo + fileName),
 		Body:   r,
 	})
@@ -626,7 +779,10 @@ func resolveSecondsToReadableAdTimeFormat(duration int) string {
 	var hours int = duration / 3600
 	var minutes int = (duration - (hours * 3600)) / 60
 	var seconds int = (duration - ((hours * 3600) + (minutes * 60)))
-	return strconv.Itoa(hours) + ":" + strconv.Itoa(minutes) + ":" + strconv.Itoa(seconds)
+	hoursPadded := fmt.Sprintf("%02s", strconv.Itoa(hours))
+	minutesPadded := fmt.Sprintf("%02s", strconv.Itoa(minutes))
+	secondsPadded := fmt.Sprintf("%02s", strconv.Itoa(seconds))
+	return hoursPadded + ":" + minutesPadded + ":" + secondsPadded
 }
 
 func resolveValidAdsMidRolls(r *http.Request) []structs.AdUnit {
@@ -639,7 +795,7 @@ func resolveValidAdsMidRolls(r *http.Request) []structs.AdUnit {
 			fmt.Printf("Err %v", err)
 			return records
 		} else {
-			fmt.Printf("Cursor %v", cursor.ID())
+			// fmt.Printf("Cursor %v", cursor.ID())
 			for cursor.Next(context.TODO()) {
 				var result structs.AdUnit
 				if err := cursor.Decode(&result); err != nil {
@@ -668,6 +824,16 @@ func generateVastQueryParameters(r *http.Request, adUnit structs.AdUnit) string 
 	params = params + "id=" + adUnit.ID
 	params = params + "&type=" + adUnit.AdType
 	params = params + "&document=" + adUnit.DocumentId
+	return params
+}
+
+func generateVmapQueryParameters(params string, r *http.Request, adUnit structs.AdUnit, linear bool, vpos string) string {
+	if linear == true {
+		params = params + "&vad_type=linear"
+	}
+	if vpos != "" {
+		params = params + "&vpos=" + vpos
+	}
 	return params
 }
 

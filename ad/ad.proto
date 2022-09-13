@@ -8,7 +8,7 @@ option go_package = "tycoon.systems/tycoon-services;tycoon_services";
 Methods that must be consumed by Go must start with uppercase. */
 
 service adManagement {
-    rpc CreateNewAdVast (NewVast) returns (Vast) {}
+    rpc CreateNewVastCompliantAdVideoJob (NewVast) returns (Vast) {}
     rpc returnVastJobResult (Vast) returns (Vast) {}
 }
 
@@ -26,6 +26,9 @@ message NewVast {
     string      AdTitle = 11;
     string      ClickthroughUrl = 12;
     string      CallToAction = 13;
+    string      StartTime = 14;
+    string      EndTime = 15;
+    string      PlayTime = 16;
 }
 
 message Vast {

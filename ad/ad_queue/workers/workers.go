@@ -29,7 +29,7 @@ func BuildWorkerServer() {
 		},
 	)
 	mux := asynq.NewServeMux()
-	mux.HandleFunc(ad_queue.TypeVastGenerate, ad_queue.HandleVastDeliveryTask)
+	mux.HandleFunc(ad_queue.TypeVastGenerate, ad_queue.HandleCreateVastCompliantAdVideoTask)
 	if err := srv.Run(mux); err != nil {
 		log.Printf("Could not run Job Queue Server: %v", err)
 	}
