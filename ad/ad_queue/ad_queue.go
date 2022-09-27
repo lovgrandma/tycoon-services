@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/hibiken/asynq"
+	ffmpeg "github.com/u2takey/ffmpeg-go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -76,7 +77,7 @@ func ProvisionCreateNewVastCompliantAdVideoJob(vast structs.VastTag) string {
 		if err != nil {
 			log.Printf("Could not create Vast Generate task at Enqueue: %v", err)
 		}
-		// log.Printf("Enqueued Sms Delivery task: %v %v %v %v %v %v %v", info.ID, info.Queue, info.State, info.Timeout, info.LastErr, info.Type, info)
+		log.Printf("Enqueued Ad Creation task")
 		return info.ID
 	}
 	return "failed"
@@ -114,9 +115,11 @@ func PerformVastCompliantAdVideoGeneration(vast structs.VastTag) error {
 
 	// get location of highest resolution file 1080 -> 720 -> 540 -> 360. If nothing higher than 360 fail
 	videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
+	adUnits := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("adunits")
 	record := &structs.Video{}
 	err := videos.FindOne(context.TODO(), bson.D{{"_id", vast.DocumentId}}).Decode(&record) // Get from video data
 	if err != nil {
+		log.Printf("Get Video Failed %v", err)
 		return fmt.Errorf("Get Video Failed")
 	}
 	fmt.Printf("Media %v", record.Media)
@@ -195,22 +198,99 @@ func PerformVastCompliantAdVideoGeneration(vast structs.VastTag) error {
 		Bucket: aws.String(s3VideoEndpoint),
 		Key:    aws.String(a1Endpoint),
 	})
-	err = ioutil.WriteFile(vastUploadFolderPath+vast.ID+"-720.mp4", vBuf, 0644)
+	err = ioutil.WriteFile(vastUploadFolderPath+vast.ID+"-720-raw.mp4", vBuf, 0644)
 	if err != nil {
 		log.Printf("err %v", err)
 		return err
 	}
-	err = ioutil.WriteFile(vastUploadFolderPath+vast.ID+"-audio.mp4", aBuf, 0644)
+	err = ioutil.WriteFile(vastUploadFolderPath+vast.ID+"-audio-raw.mp4", aBuf, 0644)
 	if err != nil {
 		log.Printf("err %v", err)
 		return err
 	}
 
 	// generate video with "packed" audio based on starttime and endtime using ffmpeg
+	err = ffmpeg.Input(vastUploadFolderPath+vast.ID+"-720-raw.mp4", ffmpeg.KwArgs{
+		"i": vastUploadFolderPath + vast.ID + "-audio-raw.mp4",
+	}).
+		Output(vastUploadFolderPath+vast.ID+"-720-paudio.mp4", ffmpeg.KwArgs{
+			"ss":          vast.StartTime,
+			"t":           vast.PlayTime,
+			"c":           "copy",
+			"shortest":    "",
+			"vf":          "scale=" + "-2:" + "720", // Sets scaled resolution with same ratios
+			"c:v":         "libx264",                // Set video codec
+			"c:a":         "aac",
+			"crf":         "24",                                  // Level of quality
+			"tune":        "film",                                // Codec tune setting
+			"x264-params": "keyint=24:min-keyint=24:no-scenecut", // Group of pictures setting
+			"profile:v":   "baseline",
+			"level":       "3.0",
+			"pix_fmt":     "yuv420p",
+			"preset":      "veryfast",   // Transcode speed
+			"movflags":    "+faststart", // Move moov data to beginning of video with second pass for faster web start
+			"x264opts":    "opencl",     // Enable opencl usage to improve speed of trancoding using GPU
+		}).
+		ErrorToStdOut().
+		Run()
+	if err != nil {
+		fmt.Printf("Issue with transcoding Video %v\nPath: %v\nAudio Path: %v\nOutput: %v\n", err, vastUploadFolderPath+vast.ID+"-720-raw.mp4", vastUploadFolderPath+vast.ID+"-720-audio.mp4", vastUploadFolderPath+vast.ID+"-720-audio.mp4")
+		return err
+	}
+	fmt.Printf("Done FFmpeg Job")
 
 	// upload to tycoon-systems-ads/video or tycoon-systems-ads-development/video
+	uploader := manager.NewUploader(client)
+
+	f, _ := os.Open(vastUploadFolderPath + vast.ID + "-720-paudio.mp4")
+	r := bufio.NewReader(f)
+	fmt.Printf("Uploading: %v\n", vastUploadFolderPath+vast.ID+"-720-paudio.mp4")
+	_, err = uploader.Upload(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(s3VideoAdEndpoint),
+		Key:    aws.String("video/" + vast.ID + "-720-paudio.mp4"),
+		Body:   r,
+	})
+	if err != nil {
+		return err
+	}
+	f.Close()
+
+	// Remove old media
+	oldAdRecord := &structs.AdUnit{}
+	err = adUnits.FindOne(context.TODO(), bson.D{{"_id", vast.ID}}).Decode(&oldAdRecord) // Get from video data
+	if len(oldAdRecord.Media) > 0 {
+		for i := 0; i < len(oldAdRecord.Media); i++ {
+			client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+				Bucket: aws.String(s3VideoAdEndpoint),
+				Key:    aws.String("video/" + oldAdRecord.Media[i]),
+			})
+		}
+	}
+
 	// store record on mongodb
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	var adUnit structs.AdUnit
+	duration := structs.Duration{
+		StartTime: vast.StartTime,
+		EndTime:   vast.EndTime,
+		PlayTime:  vast.PlayTime,
+	}
+	mediaItems := []string{}
+	mediaItems = append(mediaItems, vast.ID+"-720-paudio.mp4")
+	err = adUnits.FindOneAndUpdate(
+		context.TODO(),
+		bson.D{{"_id", vast.ID}},
+		bson.M{"$set": bson.M{"media": mediaItems, "duration": duration}},
+		opts).
+		Decode(&adUnit)
+	if err != nil {
+		log.Printf("Update Mongo Ad Unit Failed %v", err)
+		return err
+	}
 	// delete local files
+	DeleteFile(vast.ID+"-720-raw.mp4", vastUploadFolderPath)
+	DeleteFile(vast.ID+"-audio-raw.mp4", vastUploadFolderPath)
+	DeleteFile(vast.ID+"-720-paudio.mp4", vastUploadFolderPath)
 	// advise node.js server job is done, ad is in review
 
 	// f, err := GenerateVast(vast)
@@ -749,7 +829,7 @@ func UpdateRecord(url string, id string) (bool, error) {
 	}
 	adUnits := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("adunits")
 	record := &structs.VastTag{}
-	err := adUnits.FindOne(context.TODO(), bson.D{{"_id", id}}).Decode(&record) // Get from phone number data
+	err := adUnits.FindOne(context.TODO(), bson.D{{"_id", id}}).Decode(&record)
 	if err == mongo.ErrNoDocuments {
 		return false, fmt.Errorf("No record of existing adunit for vast tag")
 	} else {

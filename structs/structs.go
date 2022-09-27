@@ -128,7 +128,15 @@ type AdUnit struct {
 	AdvertEndTime     int
 	Vast              string
 	Vpaid             string
+	Media             []string
+	Duration          Duration
 	History           []AdHistoryItem
+}
+
+type Duration struct {
+	StartTime string
+	EndTime   string
+	PlayTime  string
 }
 
 type AdHistoryItem struct {
