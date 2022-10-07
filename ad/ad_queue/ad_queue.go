@@ -33,6 +33,11 @@ import (
 	"encoding/xml"
 	"log"
 	"net/http"
+
+	"time"
+
+	"google.golang.org/grpc"
+	adpb "tycoon.systems/tycoon-services/ad"
 )
 
 var (
@@ -56,6 +61,7 @@ var (
 	adServerEndPoint     = s3credentials.GetS3Data("app", "server", "")
 	adServerPort         = s3credentials.GetS3Data("app", "adServerPort", "")
 	videoCdn             = s3credentials.GetS3Data("prod", "tycoonSystemsVideo1", "")
+	adVideoCdn           = s3credentials.GetS3Data("prod", "tycoonSystemsAds1", "")
 )
 
 const (
@@ -239,6 +245,18 @@ func PerformVastCompliantAdVideoGeneration(vast structs.VastTag) error {
 	}
 	fmt.Printf("Done FFmpeg Job")
 
+	// Remove old media
+	oldAdRecord := &structs.AdUnit{}
+	err = adUnits.FindOne(context.TODO(), bson.D{{"_id", vast.ID}}).Decode(&oldAdRecord) // Get from video data
+	if len(oldAdRecord.Media) > 0 {
+		for i := 0; i < len(oldAdRecord.Media); i++ {
+			client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+				Bucket: aws.String(s3VideoAdEndpoint),
+				Key:    aws.String("video/" + oldAdRecord.Media[i]),
+			})
+		}
+	}
+
 	// upload to tycoon-systems-ads/video or tycoon-systems-ads-development/video
 	uploader := manager.NewUploader(client)
 
@@ -254,18 +272,6 @@ func PerformVastCompliantAdVideoGeneration(vast structs.VastTag) error {
 		return err
 	}
 	f.Close()
-
-	// Remove old media
-	oldAdRecord := &structs.AdUnit{}
-	err = adUnits.FindOne(context.TODO(), bson.D{{"_id", vast.ID}}).Decode(&oldAdRecord) // Get from video data
-	if len(oldAdRecord.Media) > 0 {
-		for i := 0; i < len(oldAdRecord.Media); i++ {
-			client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
-				Bucket: aws.String(s3VideoAdEndpoint),
-				Key:    aws.String("video/" + oldAdRecord.Media[i]),
-			})
-		}
-	}
 
 	// store record on mongodb
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
@@ -292,25 +298,7 @@ func PerformVastCompliantAdVideoGeneration(vast structs.VastTag) error {
 	DeleteFile(vast.ID+"-audio-raw.mp4", vastUploadFolderPath)
 	DeleteFile(vast.ID+"-720-paudio.mp4", vastUploadFolderPath)
 	// advise node.js server job is done, ad is in review
-
-	// f, err := GenerateVast(vast)
-	// if err != nil {
-	// 	if len(f) > 0 {
-	// 		DeleteFile(f, vastUploadFolderPath)
-	// 	}
-	// 	return err
-	// }
-	// var url string
-	// url, err = UploadVastS3(f)
-	// if err != nil {
-	// 	DeleteFile(f, vastUploadFolderPath)
-	// 	return err
-	// } else if len(url) == 0 {
-	// 	DeleteFile(f, vastUploadFolderPath)
-	// 	return fmt.Errorf("Error uploading VastTag to S3. No url from UploadVastS3 function")
-	// }
-	// UpdateRecord(url, vast.ID)
-	// DeleteFile(f, vastUploadFolderPath)
+	returnFinishedAdCreativeCreationJobReport(vast, "Success transcoding", "video/")
 	return nil
 }
 
@@ -667,22 +655,19 @@ type MediaFileElement struct {
 
 func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 	id := r.URL.Query().Get("id")
-	documentId := r.URL.Query().Get("document")
 	protocol := "https://"
 	root := adServerEndPoint
 	if devEnv == "true" {
 		protocol = "http://"
 		root = "localhost"
-		videoCdn = s3credentials.GetS3Data("dev", "tycoonSystemsVideo1", "")
+		adVideoCdn = s3credentials.GetS3Data("dev", "tycoonSystemsAds1", "")
 	}
 	record := &structs.AdUnit{}
-	playRecord := &structs.Video{}
 	if client != nil {
 		adUnits := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("adunits")
-		adUnits.FindOne(context.TODO(), bson.D{{"_id", id}}).Decode(&record) // Get from phone number data
-		videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
-		videos.FindOne(context.TODO(), bson.D{{"_id", documentId}}).Decode(&playRecord)
+		adUnits.FindOne(context.TODO(), bson.D{{"_id", id}}).Decode(&record)
 	}
+	var duration structs.Duration = record.Duration
 	vastQueryParams := generateVastQueryParameters(r, *record)
 	response := Vast{
 		xml.Name{},
@@ -707,7 +692,7 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 							"1",
 							LinearElement{
 								xml.Name{},
-								resolveSecondsToReadableAdTimeFormat(playRecord.Duration),
+								duration.PlayTime,
 								TrackingEventsElement{
 									xml.Name{},
 									[]TrackingEventElement{
@@ -731,8 +716,9 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 									xml.Name{},
 									[]MediaFileElement{
 										// {xml.Name{}, "Tycoon", "progressive", "426", "240", "video/mp4", "49", "258", "true", "true", "<![CDATA[ https://d2wj75ner94uq0.cloudfront.net/video/63fc01dc50af45988feac2208ff087ac-720.mp4 ]]>"},
-										{xml.Name{}, "Tycoon", "streaming", "426", "240", "application/x-mpegURL", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Hls + " ]]>"},
-										{xml.Name{}, "Tycoon", "streaming", "426", "240", "application/dash+xml", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Mpd + " ]]>"},
+										// {xml.Name{}, "Tycoon", "streaming", "426", "240", "application/x-mpegURL", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Hls + " ]]>"},
+										// {xml.Name{}, "Tycoon", "streaming", "426", "240", "application/dash+xml", "49", "258", "true", "true", "<![CDATA[ " + videoCdn + "/video/" + playRecord.Mpd + " ]]>"},
+										{xml.Name{}, "Tycoon", "progressive", "960", "720", "video/mp4", "49", "258", "true", "true", "<![CDATA[ " + adVideoCdn + "/video/" + record.Media[0] + " ]]>"},
 									},
 								},
 							},
@@ -870,7 +856,7 @@ func resolveValidAdsMidRolls(r *http.Request) []structs.AdUnit {
 	var records []structs.AdUnit
 	if client != nil {
 		adUnits := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("adunits")
-		cursor, err := adUnits.Find(context.TODO(), bson.D{{"publish", true}}) // Get from video data
+		cursor, err := adUnits.Find(context.TODO(), bson.D{{"status", "live"}, {"publish", true}}) // Get from video data
 		if err != nil {
 			fmt.Printf("Err %v", err)
 			return records
@@ -921,4 +907,22 @@ func removeAdAtIndex(a []structs.AdUnit, i int) []structs.AdUnit {
 	t := make([]structs.AdUnit, 0)
 	t = append(t, a[:i]...)
 	return append(t, a[i+1:]...)
+}
+
+func returnFinishedAdCreativeCreationJobReport(vast structs.VastTag, status string, destination string) {
+	useReturnJobResultAddr := returnJobResultAddr
+	if os.Getenv("dev") == "true" {
+		useReturnJobResultAddr = "localhost"
+	}
+	conn, err := grpc.Dial(useReturnJobResultAddr+":"+returnJobResultPort, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		fmt.Printf("Err: %v", err)
+	}
+	if err == nil {
+		defer conn.Close()
+		c := adpb.NewAdManagementClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		c.ReturnVastJobResult(ctx, &adpb.Vast{ID: vast.ID, DocumentId: vast.DocumentId, Status: status, Socket: vast.Socket, Destination: destination, Filename: "", Path: ""})
+	}
 }
