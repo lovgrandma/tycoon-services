@@ -945,3 +945,51 @@ func resolveInc(v string, event string, by int) int {
 	}
 	return 0
 }
+
+func AggregateAdAnalytics() {
+	adUnits := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("adunits")
+	cursor, err := adUnits.Find(context.TODO(), bson.D{}) // Get from video data
+	if err != nil {
+		fmt.Printf("Err %v", err)
+		return
+	} else {
+		for cursor.Next(context.TODO()) {
+			var result structs.AdUnit
+			if err := cursor.Decode(&result); err != nil {
+				fmt.Printf("Error %v", err)
+				continue
+			}
+			fmt.Printf("Ad Unit %v", result.ID)
+			currentTime := time.Now()
+			currentRecordDoc := result.ID + "-" + currentTime.Format("2006-01-02")
+			todaysViews := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "view")
+			todaysClicks := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "click")
+			todaysViewsFloat, err2 := strconv.ParseFloat(todaysViews.Val(), 64)
+			todaysClicksFloat, err3 := strconv.ParseFloat(todaysClicks.Val(), 64)
+			if err2 != nil || err3 != nil {
+				continue
+			}
+			viewCost := 0.00719
+			clickCost := 0.35
+			todaysViewsBudget := todaysViewsFloat * viewCost
+			todaysClicksBudget := todaysClicksFloat * clickCost
+			currentBudgetUse := float64(result.CurrentBudgetUse)
+			newCurrentBudgetUse := todaysViewsBudget + todaysClicksBudget + currentBudgetUse
+			newCurrentBudgetUseInt := int(newCurrentBudgetUse)
+			var adUnit structs.AdUnit
+			opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+			err = adUnits.FindOneAndUpdate(
+				context.TODO(),
+				bson.D{{"_id", result.ID}},
+				bson.M{"$set": bson.M{"currentBudgetUse": newCurrentBudgetUseInt}},
+				opts).
+				Decode(&adUnit)
+			if err != nil {
+				log.Printf("Update Mongo Ad Unit during CRON Failed %v", err)
+				continue
+			}
+		}
+	}
+}
+
+// func recordDaysAdAnalytics()
