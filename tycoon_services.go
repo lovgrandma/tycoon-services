@@ -19,6 +19,9 @@ import (
 	"tycoon.systems/tycoon-services/video/video_queue/transcode"
 	video_workers "tycoon.systems/tycoon-services/video/video_queue/workers"
 
+	"time"
+
+	"github.com/go-co-op/gocron"
 	"google.golang.org/grpc"
 	adpb "tycoon.systems/tycoon-services/ad"
 	pb "tycoon.systems/tycoon-services/sms"
@@ -136,6 +139,7 @@ func main() {
 	go video_workers.BuildWorkerServer() // Server for video job queue
 	go ad_workers.BuildWorkerServer()    // Server for ad job queue
 	go serveAdCompliantServer()
+	go serverCronRoutines() // Initiate server cron routines
 	log.Printf("Server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
@@ -146,6 +150,8 @@ func serveAdCompliantServer() *http.Server {
 	http.HandleFunc("/ads/vmap", handleAdRequests)
 	http.HandleFunc("/ads/vast", handleAdVastRequests)
 	http.HandleFunc("/ads/error", handleAdErrorRequests)
+	http.HandleFunc("/ads/view", handleAdViewRequests)
+	http.HandleFunc("/ads/track", handleAdTrackRequests)
 	log.Printf("Ad Compliant Server listening at %v", adServerPort)
 	err := http.ListenAndServe(adServerPort, nil)
 	if err != nil {
@@ -169,11 +175,8 @@ func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWri
 func handleAdErrorRequests(w http.ResponseWriter, r *http.Request) {
 	f := r.URL.Query().Get("videoplayfailed")
 	log.Printf("Ad Failure %v", f)
-	match, w := matchOrigin(w, r)
+	_, w = matchOrigin(w, r)
 	w.WriteHeader(http.StatusOK)
-	if match == false {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-	}
 
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.Header().Set("Content-Type", "application/text")
@@ -182,10 +185,7 @@ func handleAdErrorRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAdVastRequests(w http.ResponseWriter, r *http.Request) {
-	match, w := matchOrigin(w, r)
-	if match == false {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-	}
+	_, w = matchOrigin(w, r)
 
 	vmap, err := ad_queue.GenerateAndServeVast(r)
 	if err != nil {
@@ -199,10 +199,7 @@ func handleAdVastRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAdRequests(w http.ResponseWriter, r *http.Request) {
-	match, w := matchOrigin(w, r)
-	if match == false {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-	}
+	_, w = matchOrigin(w, r)
 
 	vmap, err := ad_queue.GenerateAndServeVmap(r)
 	if err != nil {
@@ -213,6 +210,22 @@ func handleAdRequests(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/xml")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.Write(vmap)
+}
+
+func handleAdViewRequests(w http.ResponseWriter, r *http.Request) {
+	match, w := matchOrigin(w, r)
+	if match == true {
+		ad_queue.RecordView(r)
+	}
+	w.Write([]byte{})
+}
+
+func handleAdTrackRequests(w http.ResponseWriter, r *http.Request) {
+	match, w := matchOrigin(w, r)
+	if match == true {
+		ad_queue.HandleTrackRequest(r)
+	}
+	w.Write([]byte{})
 }
 
 func newVideoServer() *grpc.Server {
@@ -241,4 +254,13 @@ func newAdServer() *grpc.Server {
 		log.Fatalf("Failed to run Ad server: %v", err)
 	}
 	return grpc.NewServer()
+}
+
+func serverCronRoutines() {
+	s := gocron.NewScheduler(time.UTC)
+	s.Every(5).Day().At("23:00:00").Do(func() {
+		currentTime := time.Now()
+		log.Printf("CRON %v", currentTime.Format("2006-01-02"))
+	})
+	s.StartBlocking()
 }

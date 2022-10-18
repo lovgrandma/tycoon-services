@@ -70,7 +70,8 @@ func returnRawJsonBytes() []byte {
             "mpstnumbersport": 6385,
             "tycoon_systems_queue_port": 6386,
             "tycoon_systems_video_queue_port": 6387,
-            "tycoon_systems_ad_queue_port": 6388
+            "tycoon_systems_ad_queue_port": 6388,
+            "tycoon_systems_ad_analytics_port": 6389
         },
         "twilio": {
             "sid": "ACdebcfdac964631e37cfb607dfb5204b2",

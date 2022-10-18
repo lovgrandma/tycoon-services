@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 
-	"html/template"
 	"os"
 
 	"github.com/hibiken/asynq"
@@ -38,6 +38,8 @@ import (
 
 	"google.golang.org/grpc"
 	adpb "tycoon.systems/tycoon-services/ad"
+
+	"github.com/go-redis/redis/v8"
 )
 
 var (
@@ -49,19 +51,25 @@ var (
 	}
 	clientOpts = options.Client().ApplyURI(uri).
 			SetAuth(credential)
-	client, err          = mongo.Connect(context.TODO(), clientOpts)
-	jobQueueAddr         = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_ad_queue_port", "")
-	jobClient            = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
-	returnJobResultPort  = "6005"
-	returnJobResultAddr  = s3credentials.GetS3Data("app", "prodhost", "")
-	vastUploadFolderPath = "../tycoon-services-vast-ad-generation/"
-	s3VideoEndpoint      = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-video")
-	s3VideoAdEndpoint    = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-ads")
-	devEnv               = s3credentials.GetS3Data("app", "dev", "")
-	adServerEndPoint     = s3credentials.GetS3Data("app", "server", "")
-	adServerPort         = s3credentials.GetS3Data("app", "adServerPort", "")
-	videoCdn             = s3credentials.GetS3Data("prod", "tycoonSystemsVideo1", "")
-	adVideoCdn           = s3credentials.GetS3Data("prod", "tycoonSystemsAds1", "")
+	client, err                         = mongo.Connect(context.TODO(), clientOpts)
+	jobQueueAddr                        = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_ad_queue_port", "")
+	adAnalyticsAddr                     = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_ad_analytics_port", "")
+	jobClient                           = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
+	returnJobResultPort                 = "6005"
+	returnJobResultAddr                 = s3credentials.GetS3Data("app", "prodhost", "")
+	vastUploadFolderPath                = "../tycoon-services-vast-ad-generation/"
+	s3VideoEndpoint                     = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-video")
+	s3VideoAdEndpoint                   = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-ads")
+	devEnv                              = s3credentials.GetS3Data("app", "dev", "")
+	adServerEndPoint                    = s3credentials.GetS3Data("app", "server", "")
+	adServerPort                        = s3credentials.GetS3Data("app", "adServerPort", "")
+	videoCdn                            = s3credentials.GetS3Data("prod", "tycoonSystemsVideo1", "")
+	adVideoCdn                          = s3credentials.GetS3Data("prod", "tycoonSystemsAds1", "")
+	tycoonSystemsAdAnalyticsRedisClient = redis.NewClient(&redis.Options{
+		Addr:     adAnalyticsAddr,
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 )
 
 const (
@@ -300,94 +308,6 @@ func PerformVastCompliantAdVideoGeneration(vast structs.VastTag) error {
 	// advise node.js server job is done, ad is in review
 	returnFinishedAdCreativeCreationJobReport(vast, "Success transcoding", "video/")
 	return nil
-}
-
-func GenerateVast(vast structs.VastTag) (string, error) {
-	type VastData struct {
-		AdId               string
-		AdSystem           string
-		AdTitle            string
-		GeneralTrackingUrl string
-		ImpressionUrl      string
-		ClickthroughUrl    string
-		ClickTrackingUrl   string
-		MpegDashUrl        string
-		HlsUrl             string
-		StaticImageUrl     string
-		ErrorUrl           string
-	}
-	const tmpl = `<VAST version="2.0">
-	<Ad id="{{.AdId}}">
-		<InLine>
-			<AdSystem>{{.AdSystem}}</AdSystem>
-			<AdTitle>{{.AdTitle}}</AdTitle>
-			<Error>{{.ErrorUrl}}&amp;code=[ERRORCODE]</Error>
-			<Impression>{{.ImpressionUrl}}</Impression>
-			<Creatives>
-				<Creative>
-					<Linear>
-						<Duration>00:00:30</Duration>
-						<TrackingEvents>
-							<Tracking event="start">{{.GeneralTrackingUrl}}&amp;action=start</Tracking>
-							<Tracking event="firstQuartile">{{.GeneralTrackingUrl}}&amp;action=firstQuartile</Tracking>
-							<Tracking event="midpoint">{{.GeneralTrackingUrl}}&amp;action=midpoint</Tracking>
-							<Tracking event="thirdQuartile">{{.GeneralTrackingUrl}}&amp;action=thirdQuartile</Tracking>
-							<Tracking event="complete">{{.GeneralTrackingUrl}}&amp;action=complete</Tracking>
-							<Tracking event="pause">{{.GeneralTrackingUrl}}&amp;action=pause</Tracking>
-							<Tracking event="mute">{{.GeneralTrackingUrl}}&amp;action=mute</Tracking>
-							<Tracking event="fullscreen">{{.GeneralTrackingUrl}}&amp;action=fullscreen</Tracking>
-						</TrackingEvents>
-						<VideoClicks>
-							<ClickThrough>{{.ClickthroughUrl}}</ClickThrough>
-							<ClickTracking>{{.ClickTrackingUrl}}</ClickTracking>
-						</VideoClicks>
-						<MediaFiles>
-							<MediaFile id="GDFP" delivery="streaming" width="426" height="240" type="application/x-mpegURL" minBitrate="49" maxBitrate="258" scalable="true" maintainAspectRatio="true">{{.HlsUrl}}
-							</MediaFile>
-							<MediaFile id="GDFP" delivery="streaming" width="426" height="240" type="application/dash+xml" minBitrate="49" maxBitrate="258" scalable="true" maintainAspectRatio="true">{{.MpegDashUrl}}</MediaFile>
-						</MediaFiles>
-						<Icons>
-							<Icon program="AdChoices" height="16" width="16" xPosition="right" yPosition="top">
-								<StaticResource creativeType="image/jpg">{{.StaticImageUrl}}</StaticResource>
-								<IconClicks>
-									<IconClickThrough>{{.ClickthroughUrl}}</IconClickThrough>
-								</IconClicks>
-							</Icon>
-						</Icons>
-					</Linear>
-				</Creative>
-			</Creatives>
-		</InLine>
-	</Ad>
-</VAST>`
-	t := template.Must(template.New("VastTag").Parse(tmpl))
-	data := VastData{
-		AdId:               vast.ID,
-		AdSystem:           "Tycoon",
-		AdTitle:            vast.AdTitle,
-		GeneralTrackingUrl: "https://" + vast.TrackingUrl + "/tracking?asi=" + vast.ID,
-		ImpressionUrl:      "https://" + vast.TrackingUrl + "/tracking?asi=" + vast.ID + "&action=impression",
-		ClickthroughUrl:    vast.ClickthroughUrl,
-		ClickTrackingUrl:   "https://" + vast.TrackingUrl + "/tracking?asi=" + vast.ID + "&action=clicktracking",
-		MpegDashUrl:        "https://" + vast.TrackingUrl + "/fetchAdVideo?asi=" + vast.ID + "&document=" + vast.DocumentId + "&type=dash",
-		HlsUrl:             "https://" + vast.TrackingUrl + "/fetchAdVideo?asi=" + vast.ID + "&document=" + vast.DocumentId + "&type=hls",
-		StaticImageUrl:     "https://" + vast.TrackingUrl + "/fetchAdImage?asi=" + vast.ID + "&document=" + vast.DocumentId + "&type=staticImage",
-		ErrorUrl:           "https://" + vast.TrackingUrl + "/adError?asi=" + vast.ID,
-	}
-	t.Execute(os.Stdout, data)
-	vastOutput := vastUploadFolderPath + vast.ID + ".xml"
-	f, err := os.Create(vastOutput)
-	if err != nil {
-		fmt.Printf("Err %v", err)
-		return "", err
-	}
-	err = t.Execute(f, data)
-	if err != nil {
-		fmt.Printf("Err %v", err)
-		return "", err
-	}
-	f.Close()
-	return vast.ID + ".xml", nil
 }
 
 type Vmap struct {
@@ -669,6 +589,7 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 	}
 	var duration structs.Duration = record.Duration
 	vastQueryParams := generateVastQueryParameters(r, *record)
+	escapedQueryParams := strings.ReplaceAll(vastQueryParams, "&", "&amp;")
 	response := Vast{
 		xml.Name{},
 		"3.0",
@@ -681,7 +602,7 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 				record.AdTitle,
 				"<![CDATA[ " + record.AdDescription + " ]]>",
 				protocol + root + ":" + adServerPort + "/ads/error" + vastQueryParams + "&videoplayfailed=[ERRORCODE]&placebo=0",
-				"<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/view" + vastQueryParams + " ]]>",
+				protocol + root + ":" + adServerPort + "/ads/view" + vastQueryParams,
 				CreativesElement{
 					xml.Name{},
 					[]CreativeElement{
@@ -696,16 +617,17 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 								TrackingEventsElement{
 									xml.Name{},
 									[]TrackingEventElement{
-										{xml.Name{}, "start", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=start ]]>"},
-										{xml.Name{}, "firstQuartile", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=firstquartile ]]>"},
-										{xml.Name{}, "midpoint", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=midpoint ]]>"},
-										{xml.Name{}, "thirdQuartile", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=thirdquartile ]]>"},
-										{xml.Name{}, "complete", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=complete ]]>"},
-										{xml.Name{}, "pause", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=pause ]]>"},
-										{xml.Name{}, "mute", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=mute ]]>"},
-										{xml.Name{}, "fullscreen", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=fullscreen ]]>"},
-										{xml.Name{}, "acceptInvitationLinear", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=acceptinvitationlinear ]]>"},
-										{xml.Name{}, "closeLinear", "<![CDATA[ " + protocol + root + ":" + adServerPort + "/ads/track" + vastQueryParams + "&event=closelinear ]]>"},
+										{xml.Name{}, "start", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=start"},
+										{xml.Name{}, "firstQuartile", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=firstquartile"},
+										{xml.Name{}, "midpoint", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=midpoint"},
+										{xml.Name{}, "thirdQuartile", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=thirdquartile"},
+										{xml.Name{}, "complete", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=complete"},
+										{xml.Name{}, "pause", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=pause"},
+										{xml.Name{}, "mute", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=mute"},
+										{xml.Name{}, "fullscreen", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=fullscreen"},
+										{xml.Name{}, "acceptInvitationLinear", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=acceptinvitationlinear"},
+										{xml.Name{}, "closeLinear", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=closelinear"},
+										{xml.Name{}, "click", protocol + root + ":" + adServerPort + "/ads/track" + escapedQueryParams + "&amp;event=click"},
 									},
 								},
 								VideoClicksElement{
@@ -739,7 +661,7 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 									StaticResourceElement{
 										xml.Name{},
 										"image/png",
-										"<![CDATA[ https://pagead2.googlesyndication.com/simgad/4446644594546952943 ]]>",
+										"<![CDATA[ https://www.tycoon.systems/ ]]>",
 									},
 								},
 							},
@@ -770,43 +692,6 @@ func GenerateMockTimeline(duration int) []interface{} {
 		curTime += 300
 	}
 	return timeline
-}
-
-func UploadVastS3(fileName string) (string, error) {
-	fmt.Printf("%v, %v", fileName, vastUploadFolderPath)
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(s3credentials.GetS3Data("awsConfig", "mediaBucketLocation1", "")),
-		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
-			Value: aws.Credentials{
-				AccessKeyID:     s3credentials.GetS3Data("awsConfig", "accessKeyId", ""),
-				SecretAccessKey: s3credentials.GetS3Data("awsConfig", "secretAccessKey", ""),
-			},
-		}),
-	)
-	if err != nil {
-		return "", err
-	}
-	client := s3.NewFromConfig(cfg)
-	uploader := manager.NewUploader(client)
-	if devEnv == "true" {
-		s3VideoAdEndpoint = s3credentials.GetS3Data("awsConfig", "devBuckets", "tycoon-systems-ads-development")
-	}
-	fmt.Printf("s3VideoAdEndpoint %v\n", s3VideoAdEndpoint)
-	upFrom := vastUploadFolderPath
-	upTo := "vasttag/"
-	f, _ := os.Open(upFrom + fileName)
-	r := bufio.NewReader(f)
-	fmt.Printf("Uploading: %v %v\n", upFrom+fileName, upTo+fileName)
-	_, err = uploader.Upload(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(s3VideoAdEndpoint),
-		Key:    aws.String(upTo + fileName),
-		Body:   r,
-	})
-	if err != nil {
-		return "", err
-	}
-	f.Close() // Close stream to prevent permissions issue
-	return fileName, nil
 }
 
 func UpdateRecord(url string, id string) (bool, error) {
@@ -861,14 +746,40 @@ func resolveValidAdsMidRolls(r *http.Request) []structs.AdUnit {
 			fmt.Printf("Err %v", err)
 			return records
 		} else {
-			// fmt.Printf("Cursor %v", cursor.ID())
 			for cursor.Next(context.TODO()) {
 				var result structs.AdUnit
 				if err := cursor.Decode(&result); err != nil {
 					fmt.Printf("Error %v", err)
 					return records
 				}
-				records = append(records, result)
+				currentTime := time.Now()
+				totalRecordDoc := result.ID + "-" + "total"
+				currentRecordDoc := result.ID + "-" + currentTime.Format("2006-01-02")
+				existsViews := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), totalRecordDoc, "view")
+				existsClicks := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), totalRecordDoc, "click")
+				todaysViews := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "view")
+				todaysClicks := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "click")
+				totalViewsFloat, err := strconv.ParseFloat(existsViews.Val(), 64)
+				totalClicksFloat, err2 := strconv.ParseFloat(existsClicks.Val(), 64)
+				todaysViewsFloat, err3 := strconv.ParseFloat(todaysViews.Val(), 64)
+				todaysClicksFloat, err4 := strconv.ParseFloat(todaysClicks.Val(), 64)
+				if err != nil || err2 != nil || err3 != nil || err4 != nil {
+					log.Printf("err %v, err2 %v, err3 %v, err4 %v", err, err2, err3, err4)
+					records = append(records, result)
+				} else {
+					viewCost := 0.00719
+					clickCost := 0.35
+					viewsBudget := totalViewsFloat * viewCost
+					clicksBudget := totalClicksFloat * clickCost
+					todaysViewsBudget := todaysViewsFloat * viewCost
+					todaysClicksBudget := todaysClicksFloat * clickCost
+					maxCampaignBudgetFloat := float64(result.MaxCampaignBudget)
+					dailyCampaignBudgetFloat := float64(result.DailyBudget)
+					if viewsBudget+clicksBudget < maxCampaignBudgetFloat && todaysViewsBudget+todaysClicksBudget < dailyCampaignBudgetFloat {
+						log.Printf("Within Budget. Total Views + Clicks %v Max Campaign Budget %v Todays Views + Clicks %v Daily Campaign Budget %v. Views %v, Clicks %v, todaysViews %v, todaysClicks %v", viewsBudget+clicksBudget, maxCampaignBudgetFloat, todaysViewsBudget+todaysClicksBudget, dailyCampaignBudgetFloat, viewsBudget, clicksBudget, todaysViewsBudget, todaysClicksBudget)
+						records = append(records, result) // within budget, serve ad
+					}
+				}
 			}
 		}
 	}
@@ -925,4 +836,112 @@ func returnFinishedAdCreativeCreationJobReport(vast structs.VastTag, status stri
 		defer cancel()
 		c.ReturnVastJobResult(ctx, &adpb.Vast{ID: vast.ID, DocumentId: vast.DocumentId, Status: status, Socket: vast.Socket, Destination: destination, Filename: "", Path: ""})
 	}
+}
+
+func RecordView(r *http.Request) {
+	id := r.URL.Query().Get("id")
+	documentType := r.URL.Query().Get("type")
+	document := r.URL.Query().Get("document")
+	fmt.Printf("Record View: %v, %v, %v\n", id, documentType, document)
+	currentTime := time.Now()
+	currentRecordDoc := id + "-" + currentTime.Format("2006-01-02")
+	totalRecordDoc := id + "-" + "total"
+	exists := tycoonSystemsAdAnalyticsRedisClient.Exists(context.TODO(), currentRecordDoc, "view")
+	totalExists := tycoonSystemsAdAnalyticsRedisClient.Exists(context.TODO(), totalRecordDoc, "view")
+	fmt.Printf("Exists %v", exists.Val())
+	if exists.Val() == 0 {
+		tycoonSystemsAdAnalyticsRedisClient.HSet(context.TODO(), currentRecordDoc,
+			"view", 1,
+			"start", 0,
+			"firstQuartile", 0,
+			"midpoint", 0,
+			"thirdQuartile", 0,
+			"complete", 0,
+			"pause", 0,
+			"mute", 0,
+			"fullscreen", 0,
+			"acceptInvitationLinear", 0,
+			"closeLinear", 0,
+			"click", 0,
+			"paid", 0,
+		)
+	} else {
+		tycoonSystemsAdAnalyticsRedisClient.HIncrBy(context.TODO(), currentRecordDoc, "view", 1)
+	}
+	if totalExists.Val() == 0 {
+		tycoonSystemsAdAnalyticsRedisClient.HSet(context.TODO(), totalRecordDoc,
+			"view", 1,
+			"start", 0,
+			"firstQuartile", 0,
+			"midpoint", 0,
+			"thirdQuartile", 0,
+			"complete", 0,
+			"pause", 0,
+			"mute", 0,
+			"fullscreen", 0,
+			"acceptInvitationLinear", 0,
+			"closeLinear", 0,
+			"click", 0,
+		)
+	} else {
+		tycoonSystemsAdAnalyticsRedisClient.HIncrBy(context.TODO(), totalRecordDoc, "view", 1)
+	}
+}
+
+func HandleTrackRequest(r *http.Request) {
+	id := r.URL.Query().Get("id")
+	documentType := r.URL.Query().Get("type")
+	document := r.URL.Query().Get("document")
+	event := r.URL.Query().Get("event")
+	fmt.Printf("Record Event: %v, %v, %v, %v\n", event, id, documentType, document)
+	currentTime := time.Now()
+	currentRecordDoc := id + "-" + currentTime.Format("2006-01-02")
+	totalRecordDoc := id + "-" + "total"
+	exists := tycoonSystemsAdAnalyticsRedisClient.Exists(context.TODO(), currentRecordDoc, "view")
+	totalExists := tycoonSystemsAdAnalyticsRedisClient.Exists(context.TODO(), totalRecordDoc, "view")
+	fmt.Printf("Exists %v Record %v\n", exists.Val(), currentRecordDoc)
+	if exists.Val() == 0 {
+		tycoonSystemsAdAnalyticsRedisClient.HSet(context.TODO(), currentRecordDoc,
+			"view", resolveInc("view", event, 1),
+			"start", resolveInc("start", event, 1),
+			"firstQuartile", resolveInc("firstQuartile", event, 1),
+			"midpoint", resolveInc("midpoint", event, 1),
+			"thirdQuartile", resolveInc("thirdQuartile", event, 1),
+			"complete", resolveInc("complete", event, 1),
+			"pause", resolveInc("pause", event, 1),
+			"mute", resolveInc("mute", event, 1),
+			"fullscreen", resolveInc("fullscreen", event, 1),
+			"acceptInvitationLinear", resolveInc("acceptInvitationLinear", event, 1),
+			"closeLinear", resolveInc("closeLinear", event, 1),
+			"click", resolveInc("click", event, 1),
+			"paid", 0,
+		)
+	} else {
+		tycoonSystemsAdAnalyticsRedisClient.HIncrBy(context.TODO(), currentRecordDoc, event, 1)
+	}
+	if totalExists.Val() == 0 {
+		tycoonSystemsAdAnalyticsRedisClient.HSet(context.TODO(), totalRecordDoc,
+			"view", resolveInc("view", event, 1),
+			"start", resolveInc("start", event, 1),
+			"firstQuartile", resolveInc("firstQuartile", event, 1),
+			"midpoint", resolveInc("midpoint", event, 1),
+			"thirdQuartile", resolveInc("thirdQuartile", event, 1),
+			"complete", resolveInc("complete", event, 1),
+			"pause", resolveInc("pause", event, 1),
+			"mute", resolveInc("mute", event, 1),
+			"fullscreen", resolveInc("fullscreen", event, 1),
+			"acceptInvitationLinear", resolveInc("acceptInvitationLinear", event, 1),
+			"closeLinear", resolveInc("closeLinear", event, 1),
+			"click", resolveInc("click", event, 1),
+		)
+	} else {
+		tycoonSystemsAdAnalyticsRedisClient.HIncrBy(context.TODO(), totalRecordDoc, event, 1)
+	}
+}
+
+func resolveInc(v string, event string, by int) int {
+	if v == event {
+		return by
+	}
+	return 0
 }

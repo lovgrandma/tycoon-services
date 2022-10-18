@@ -125,6 +125,7 @@ type AdUnit struct {
 	ClickthroughUrl   string
 	MaxCampaignBudget int
 	DailyBudget       int
+	CurrentBudgetUse  int
 	AdvertEndTime     int
 	Vast              string
 	Vpaid             string
