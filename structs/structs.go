@@ -125,7 +125,7 @@ type AdUnit struct {
 	ClickthroughUrl   string
 	MaxCampaignBudget int
 	DailyBudget       int
-	CurrentBudgetUse  int
+	CurrentBudgetUse  float32 `bson:"currentbudgetuse,truncate"`
 	AdvertEndTime     int
 	Vast              string
 	Vpaid             string
@@ -154,4 +154,32 @@ type AdHistoryItem struct {
 
 type Origin struct {
 	Name string
+}
+
+/* Invoice */
+
+type InvoiceItem struct {
+	Name    string
+	Details string
+	Data    string
+	Cost    float32
+	Note    string
+}
+
+type Invoice struct {
+	ID              string
+	Date            string
+	Note            string
+	Customer        string
+	CustomerAddress string
+	CustomerNetwork string
+	Payee           string
+	PayeeAddress    string
+	PayeeNetwork    string
+	Owed            float32
+	Currency        string
+	Data            string
+	FootDetails     string
+	Thankyou        string
+	Paid            float32
 }

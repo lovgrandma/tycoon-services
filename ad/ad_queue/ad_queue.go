@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"reflect"
 	"regexp"
@@ -736,8 +737,10 @@ func resolveSecondsToReadableAdTimeFormat(duration int) string {
 	return hoursPadded + ":" + minutesPadded + ":" + secondsPadded
 }
 
+/**
+Find All valid ads from ad units table
+*/
 func resolveValidAdsMidRolls(r *http.Request) []structs.AdUnit {
-	// Find all valid mid rolls/ads from AdUnits table
 	var records []structs.AdUnit
 	if client != nil {
 		adUnits := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("adunits")
@@ -759,25 +762,29 @@ func resolveValidAdsMidRolls(r *http.Request) []structs.AdUnit {
 				existsClicks := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), totalRecordDoc, "click")
 				todaysViews := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "view")
 				todaysClicks := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "click")
-				totalViewsFloat, err := strconv.ParseFloat(existsViews.Val(), 64)
-				totalClicksFloat, err2 := strconv.ParseFloat(existsClicks.Val(), 64)
-				todaysViewsFloat, err3 := strconv.ParseFloat(todaysViews.Val(), 64)
-				todaysClicksFloat, err4 := strconv.ParseFloat(todaysClicks.Val(), 64)
-				if err != nil || err2 != nil || err3 != nil || err4 != nil {
-					log.Printf("err %v, err2 %v, err3 %v, err4 %v", err, err2, err3, err4)
+				if existsViews.Val() == "" || existsClicks.Val() == "" || todaysViews.Val() == "" || todaysClicks.Val() == "" {
 					records = append(records, result)
 				} else {
-					viewCost := 0.00719
-					clickCost := 0.35
-					viewsBudget := totalViewsFloat * viewCost
-					clicksBudget := totalClicksFloat * clickCost
-					todaysViewsBudget := todaysViewsFloat * viewCost
-					todaysClicksBudget := todaysClicksFloat * clickCost
-					maxCampaignBudgetFloat := float64(result.MaxCampaignBudget)
-					dailyCampaignBudgetFloat := float64(result.DailyBudget)
-					if viewsBudget+clicksBudget < maxCampaignBudgetFloat && todaysViewsBudget+todaysClicksBudget < dailyCampaignBudgetFloat {
-						log.Printf("Within Budget. Total Views + Clicks %v Max Campaign Budget %v Todays Views + Clicks %v Daily Campaign Budget %v. Views %v, Clicks %v, todaysViews %v, todaysClicks %v", viewsBudget+clicksBudget, maxCampaignBudgetFloat, todaysViewsBudget+todaysClicksBudget, dailyCampaignBudgetFloat, viewsBudget, clicksBudget, todaysViewsBudget, todaysClicksBudget)
-						records = append(records, result) // within budget, serve ad
+					totalViewsFloat, err := strconv.ParseFloat(existsViews.Val(), 64)
+					totalClicksFloat, err2 := strconv.ParseFloat(existsClicks.Val(), 64)
+					todaysViewsFloat, err3 := strconv.ParseFloat(todaysViews.Val(), 64)
+					todaysClicksFloat, err4 := strconv.ParseFloat(todaysClicks.Val(), 64)
+					if err != nil || err2 != nil || err3 != nil || err4 != nil {
+						log.Printf("err %v, err2 %v, err3 %v, err4 %v", err, err2, err3, err4)
+						records = append(records, result)
+					} else {
+						viewCost := 0.00719
+						clickCost := 0.35
+						viewsBudget := totalViewsFloat * viewCost
+						clicksBudget := totalClicksFloat * clickCost
+						todaysViewsBudget := todaysViewsFloat * viewCost
+						todaysClicksBudget := todaysClicksFloat * clickCost
+						maxCampaignBudgetFloat := float64(result.MaxCampaignBudget)
+						dailyCampaignBudgetFloat := float64(result.DailyBudget)
+						if viewsBudget+clicksBudget < maxCampaignBudgetFloat && todaysViewsBudget+todaysClicksBudget < dailyCampaignBudgetFloat {
+							log.Printf("Within Budget. Total Views + Clicks %v Max Campaign Budget %v Todays Views + Clicks %v Daily Campaign Budget %v. Views %v, Clicks %v, todaysViews %v, todaysClicks %v", viewsBudget+clicksBudget, maxCampaignBudgetFloat, todaysViewsBudget+todaysClicksBudget, dailyCampaignBudgetFloat, viewsBudget, clicksBudget, todaysViewsBudget, todaysClicksBudget)
+							records = append(records, result) // within budget, serve ad
+						}
 					}
 				}
 			}
@@ -959,37 +966,84 @@ func AggregateAdAnalytics() {
 				fmt.Printf("Error %v", err)
 				continue
 			}
-			fmt.Printf("Ad Unit %v", result.ID)
+			fmt.Printf("Ad Unit CRON Invoicing %v", result.ID)
 			currentTime := time.Now()
 			currentRecordDoc := result.ID + "-" + currentTime.Format("2006-01-02")
+			fmt.Printf("Record: %v", currentRecordDoc)
 			todaysViews := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "view")
 			todaysClicks := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "click")
-			todaysViewsFloat, err2 := strconv.ParseFloat(todaysViews.Val(), 64)
-			todaysClicksFloat, err3 := strconv.ParseFloat(todaysClicks.Val(), 64)
+			todaysViewsFloat, err2 := strconv.ParseFloat(todaysViews.Val(), 32)
+			todaysClicksFloat, err3 := strconv.ParseFloat(todaysClicks.Val(), 32)
 			if err2 != nil || err3 != nil {
 				continue
 			}
-			viewCost := 0.00719
-			clickCost := 0.35
-			todaysViewsBudget := todaysViewsFloat * viewCost
-			todaysClicksBudget := todaysClicksFloat * clickCost
-			currentBudgetUse := float64(result.CurrentBudgetUse)
-			newCurrentBudgetUse := todaysViewsBudget + todaysClicksBudget + currentBudgetUse
-			newCurrentBudgetUseInt := int(newCurrentBudgetUse)
+			var viewCost float32 = 0.00719
+			var clickCost float32 = 0.35
+			todaysViewsFloat32 := float32(todaysViewsFloat)
+			todaysClicksFloat32 := float32(todaysClicksFloat)
+			todaysViewsBudget := todaysViewsFloat32 * viewCost
+			todaysClicksBudget := todaysClicksFloat32 * clickCost
+			currentBudgetUse := float32(result.CurrentBudgetUse)
+			newCurrentBudgetUse := float64(todaysViewsBudget + todaysClicksBudget + currentBudgetUse)
+			var newCurrentBudgetUseTruncated float32 = float32(math.Ceil(newCurrentBudgetUse*100) / 100)
 			var adUnit structs.AdUnit
 			opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
 			err = adUnits.FindOneAndUpdate(
 				context.TODO(),
 				bson.D{{"_id", result.ID}},
-				bson.M{"$set": bson.M{"currentBudgetUse": newCurrentBudgetUseInt}},
+				bson.M{"$set": bson.M{"currentBudgetUse": newCurrentBudgetUseTruncated}},
 				opts).
 				Decode(&adUnit)
 			if err != nil {
 				log.Printf("Update Mongo Ad Unit during CRON Failed %v", err)
 				continue
 			}
+			todaysViewsBudgetString := fmt.Sprintf("%f", todaysViewsBudget)
+			todaysClicksBudgetString := fmt.Sprintf("%f", todaysClicksBudget)
+			configResolutions := make([]string, 0)
+			configResolutions = append(configResolutions, "2048", "1440", "720", "540", "360", "240")
+			invoiceItems := make([]structs.InvoiceItem, 0)
+			invoiceItems = append(invoiceItems, structs.InvoiceItem{
+				Name:    "views",
+				Details: "Views for Advertising Services on date " + currentTime.Format("2006-01-02") + "with total " + todaysViews.Val() + " views",
+				Data:    "views_total:" + todaysViews.Val() + ";views_cost:" + todaysViewsBudgetString,
+				Cost:    todaysViewsBudget,
+				Note:    "Tycoon Systems Network",
+			}, structs.InvoiceItem{
+				Name:    "clicks",
+				Details: "Clicks for Advertising Services on date " + currentTime.Format("2006-01-02") + "with total " + todaysClicks.Val() + " clicks",
+				Data:    "clicks_total:" + todaysClicks.Val() + ";clicks_cost:" + todaysClicksBudgetString,
+				Cost:    todaysClicksBudget,
+				Note:    "Tycoon Systems Network",
+			})
+			total := float32(todaysViewsBudget + todaysClicksBudget)
+			constructInvoice(invoiceItems, total, result.UserId, currentTime.Format("2006-01-02"))
 		}
 	}
 }
 
-// func recordDaysAdAnalytics()
+func constructInvoice(invoiceItems []structs.InvoiceItem, total float32, customer string, dateOfInvoice string) {
+	fmt.Printf("Invoice Items: %v Total %v", invoiceItems, total)
+	invoiceDataJson, _ := json.Marshal(invoiceItems)
+	invoice := structs.Invoice{
+		Date:            dateOfInvoice,
+		Note:            "Tycoon Systems Advertising Services",
+		Customer:        customer,
+		CustomerAddress: "",
+		CustomerNetwork: "Tycoon Systems Corp.",
+		Payee:           "Tycoon Systems Corp.",
+		PayeeAddress:    "",
+		PayeeNetwork:    "Tycoon Systems Corp.",
+		Owed:            total,
+		Currency:        "USD",
+		Data:            string(invoiceDataJson),
+		FootDetails:     "Payment Facilitated on Tycoon Systems Platform",
+		Thankyou:        "Thankyou For Your Business",
+		Paid:            0.0,
+	}
+	invoices := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("invoices")
+	_, err := invoices.InsertOne(context.TODO(), invoice)
+	if err != nil {
+		log.Printf("Error Inserting New Invoice Document for Customer %v on %v for total of %v", customer, dateOfInvoice, total)
+	}
+}

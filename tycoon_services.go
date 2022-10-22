@@ -259,7 +259,7 @@ func newAdServer() *grpc.Server {
 func serverCronRoutines() {
 	loc, _ := time.LoadLocation("America/New_York")
 	s := gocron.NewScheduler(loc)
-	job, err := s.Every(1).Day().At("23:00:45").Do(func() {
+	job, err := s.Every(1).Day().At("19:30:15").Do(func() {
 		currentTime := time.Now()
 		log.Printf("CRON %v", currentTime.Format("2006-01-02"))
 		ad_queue.AggregateAdAnalytics()
