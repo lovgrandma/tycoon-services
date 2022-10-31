@@ -98,6 +98,14 @@ func returnRawJsonBytes() []byte {
             },
             "testService": {
                 "Basic": "price_1KdhlkAu2LTYmPsqSetl1816"
+            },
+            "analyticsLive": {
+                "views_price": "price_1LxkmdAu2LTYmPsq39aQTW7i",
+                "clicks_price": "price_1LxkmvAu2LTYmPsqD57zCbic"
+            },
+            "analyticsDev": {
+                "views_price": "price_1Lxki4Au2LTYmPsqWKVYvlx0",
+                "clicks_price": "price_1LxkjsAu2LTYmPsqLY5XPhD7"
             }
         },
         "frontend": {

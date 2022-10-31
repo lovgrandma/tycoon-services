@@ -18,6 +18,7 @@ import (
 	"github.com/hibiken/asynq"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"tycoon.systems/tycoon-services/s3credentials"
@@ -34,6 +35,7 @@ import (
 	"encoding/xml"
 	"log"
 	"net/http"
+	"net/url"
 
 	"time"
 
@@ -41,6 +43,9 @@ import (
 	adpb "tycoon.systems/tycoon-services/ad"
 
 	"github.com/go-redis/redis/v8"
+
+	"github.com/stripe/stripe-go"
+	stripe73 "github.com/stripe/stripe-go/v73"
 )
 
 var (
@@ -71,6 +76,9 @@ var (
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
+	stripeKey   = s3credentials.GetS3Data("stripe", "key", "")
+	viewsPrice  = s3credentials.GetS3Data("stripe", "analyticsLive", "views_price")
+	clicksPrice = s3credentials.GetS3Data("stripe", "analyticsLive", "clicks_price")
 )
 
 const (
@@ -953,7 +961,7 @@ func resolveInc(v string, event string, by int) int {
 	return 0
 }
 
-func AggregateAdAnalytics() {
+func AggregateAdAnalytics(currentTime time.Time) {
 	adUnits := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("adunits")
 	cursor, err := adUnits.Find(context.TODO(), bson.D{}) // Get from video data
 	if err != nil {
@@ -966,26 +974,35 @@ func AggregateAdAnalytics() {
 				fmt.Printf("Error %v", err)
 				continue
 			}
-			fmt.Printf("Ad Unit CRON Invoicing %v", result.ID)
-			currentTime := time.Now()
+			fmt.Printf("Ad Unit CRON Invoicing %v\n", result.ID)
 			currentRecordDoc := result.ID + "-" + currentTime.Format("2006-01-02")
-			fmt.Printf("Record: %v", currentRecordDoc)
+			fmt.Printf("Record: %v\n", currentRecordDoc)
 			todaysViews := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "view")
 			todaysClicks := tycoonSystemsAdAnalyticsRedisClient.HGet(context.TODO(), currentRecordDoc, "click")
-			todaysViewsFloat, err2 := strconv.ParseFloat(todaysViews.Val(), 32)
-			todaysClicksFloat, err3 := strconv.ParseFloat(todaysClicks.Val(), 32)
+			fmt.Printf("Todays Clicks %v", todaysClicks.Val())
+			var todaysViewsFloat float64 = 0.0
+			var todaysClicksFloat float64 = 0.0
+			var err2 error
+			var err3 error
+			if todaysViews.Val() != "" {
+				todaysViewsFloat, err2 = strconv.ParseFloat(todaysViews.Val(), 32)
+			}
+			if todaysClicks.Val() != "" {
+				todaysClicksFloat, err3 = strconv.ParseFloat(todaysClicks.Val(), 32)
+			}
 			if err2 != nil || err3 != nil {
+				fmt.Printf("Error getting Views and Clicks for Record %v\n", currentRecordDoc)
 				continue
 			}
-			var viewCost float32 = 0.00719
-			var clickCost float32 = 0.35
-			todaysViewsFloat32 := float32(todaysViewsFloat)
-			todaysClicksFloat32 := float32(todaysClicksFloat)
-			todaysViewsBudget := todaysViewsFloat32 * viewCost
-			todaysClicksBudget := todaysClicksFloat32 * clickCost
-			currentBudgetUse := float32(result.CurrentBudgetUse)
-			newCurrentBudgetUse := float64(todaysViewsBudget + todaysClicksBudget + currentBudgetUse)
-			var newCurrentBudgetUseTruncated float32 = float32(math.Ceil(newCurrentBudgetUse*100) / 100)
+			var viewCost float64 = 0.00719
+			var clickCost float64 = 0.35
+			todaysViewsFloat64 := float64(todaysViewsFloat)
+			todaysClicksFloat64 := float64(todaysClicksFloat)
+			todaysViewsBudget := todaysViewsFloat64 * viewCost
+			todaysClicksBudget := todaysClicksFloat64 * clickCost
+			currentBudgetUse := float64(result.CurrentBudgetUse)
+			newCurrentBudgetUse := todaysViewsBudget + todaysClicksBudget + currentBudgetUse
+			var newCurrentBudgetUseTruncated float64 = math.Ceil(newCurrentBudgetUse*100) / 100
 			var adUnit structs.AdUnit
 			opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
 			err = adUnits.FindOneAndUpdate(
@@ -1007,25 +1024,32 @@ func AggregateAdAnalytics() {
 				Name:    "views",
 				Details: "Views for Advertising Services on date " + currentTime.Format("2006-01-02") + "with total " + todaysViews.Val() + " views",
 				Data:    "views_total:" + todaysViews.Val() + ";views_cost:" + todaysViewsBudgetString,
+				Units:   todaysViewsFloat64,
 				Cost:    todaysViewsBudget,
 				Note:    "Tycoon Systems Network",
+				AdTitle: adUnit.AdTitle,
+				AdId:    adUnit.ID,
 			}, structs.InvoiceItem{
 				Name:    "clicks",
 				Details: "Clicks for Advertising Services on date " + currentTime.Format("2006-01-02") + "with total " + todaysClicks.Val() + " clicks",
 				Data:    "clicks_total:" + todaysClicks.Val() + ";clicks_cost:" + todaysClicksBudgetString,
+				Units:   todaysClicksFloat64,
 				Cost:    todaysClicksBudget,
 				Note:    "Tycoon Systems Network",
+				AdTitle: adUnit.AdTitle,
+				AdId:    adUnit.ID,
 			})
-			total := float32(todaysViewsBudget + todaysClicksBudget)
+			total := todaysViewsBudget + todaysClicksBudget
 			constructInvoice(invoiceItems, total, result.UserId, currentTime.Format("2006-01-02"))
 		}
 	}
 }
 
-func constructInvoice(invoiceItems []structs.InvoiceItem, total float32, customer string, dateOfInvoice string) {
+func constructInvoice(invoiceItems []structs.InvoiceItem, total float64, customer string, dateOfInvoice string) {
 	fmt.Printf("Invoice Items: %v Total %v", invoiceItems, total)
 	invoiceDataJson, _ := json.Marshal(invoiceItems)
 	invoice := structs.Invoice{
+		ID:              primitive.NewObjectID(),
 		Date:            dateOfInvoice,
 		Note:            "Tycoon Systems Advertising Services",
 		Customer:        customer,
@@ -1040,10 +1064,179 @@ func constructInvoice(invoiceItems []structs.InvoiceItem, total float32, custome
 		FootDetails:     "Payment Facilitated on Tycoon Systems Platform",
 		Thankyou:        "Thankyou For Your Business",
 		Paid:            0.0,
+		History:         []string{},
 	}
 	invoices := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("invoices")
 	_, err := invoices.InsertOne(context.TODO(), invoice)
 	if err != nil {
 		log.Printf("Error Inserting New Invoice Document for Customer %v on %v for total of %v", customer, dateOfInvoice, total)
 	}
+	chargeInvoice(invoice, invoiceItems, dateOfInvoice)
+}
+
+func chargeInvoice(invoice structs.Invoice, invoiceItems []structs.InvoiceItem, dateOfInvoice string) structs.Invoice {
+	if devEnv == "true" {
+		stripeKey = s3credentials.GetS3Data("stripe", "testkey", "")
+		viewsPrice = s3credentials.GetS3Data("stripe", "analyticsDev", "views_price")
+		clicksPrice = s3credentials.GetS3Data("stripe", "analyticsDev", "clicks_price")
+	}
+	stripe.Key = stripeKey
+	stripe73.Key = stripeKey
+	var stripeCustomer string
+	if invoice.CustomerNetwork == "Tycoon Systems Corp." {
+		users := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("users")
+		record := &structs.User{}
+		err := users.FindOne(context.TODO(), bson.D{{"_id", invoice.Customer}}).Decode(&record) // Get from video data
+		if err != nil {
+			return invoice
+		}
+		stripeCustomer = record.Payment
+	}
+	metadata := make(map[string]interface{})
+	metadata["views_details"] = invoiceItems[0].Details
+	metadata["views_data"] = invoiceItems[0].Data
+	metadata["views_cost"] = invoiceItems[0].Cost
+	viewsCost := strconv.Itoa(int(math.Floor(invoiceItems[0].Cost * 100)))
+	clicksCost := strconv.Itoa(int(math.Floor(invoiceItems[1].Cost * 100)))
+	// itap := makeInvoiceItems(invoiceItems, viewsCost, clicksCost, dateOfInvoice)
+	// invoiceParams := &stripe.InvoiceParams{
+	// 	Customer:    stripe73.String(stripeCustomer),
+	// 	AutoAdvance: BoolPointer(false),
+	// 	Description: &invoice.Note,
+	// 	Footer:      &invoice.FootDetails,
+	// }
+	// fmt.Printf("%v, %v", itap, invoiceParams)
+	//params.InvoiceItems = itap
+	// Generated by curl-to-Go: https://mholt.github.io/curl-to-go
+
+	params3 := url.Values{}
+
+	params3.Add("customer", "cus_LOQj6Ll1hg9kBv")
+	params3.Add("currency", "USD")
+	params3.Add("auto_advance", "true")
+	// params3.Add("description", invoice.Note)
+	// params3.Add("footer", invoice.FootDetails)
+	body3 := strings.NewReader(params3.Encode())
+
+	req3, err3 := http.NewRequest("POST", "https://api.stripe.com/v1/invoices", body3)
+	if err3 != nil {
+		fmt.Printf("err3 %v", err3)
+		// handle err
+	}
+	req3.SetBasicAuth(stripeKey, "")
+	req3.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp3, err3 := http.DefaultClient.Do(req3)
+	if err3 != nil {
+		fmt.Printf("err3 %v", err3)
+		// handle err
+	}
+	defer resp3.Body.Close()
+
+	params := url.Values{}
+	params2 := url.Values{}
+	params.Add("currency", "USD")
+	params2.Add("currency", "USD")
+	params.Add("customer", "cus_LOQj6Ll1hg9kBv")
+	params.Add("amount", viewsCost)
+	params.Add("metadata[type]", "views")
+	params.Add("metadata[quantity]", fmt.Sprintf("%f", invoiceItems[0].Units))
+	params.Add("description", "Views for Advertising Services on date "+dateOfInvoice+" with total "+strconv.Itoa(int(math.Floor(invoiceItems[0].Units)))+" views at rate $0.00719 on Ad: "+invoiceItems[0].AdTitle+" "+invoiceItems[0].AdId)
+	body := strings.NewReader(params.Encode())
+
+	req, err := http.NewRequest("POST", "https://api.stripe.com/v1/invoiceitems", body)
+	if err != nil {
+		fmt.Printf("err %v", err)
+		// handle err
+	}
+	req.SetBasicAuth(stripeKey, "")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	params2.Add("customer", "cus_LOQj6Ll1hg9kBv")
+	params2.Add("amount", clicksCost)
+	params2.Add("metadata[type]", "clicks")
+	params2.Add("metadata[quantity]", fmt.Sprintf("%f", invoiceItems[1].Units))
+	params2.Add("description", "Clicks for Advertising Services on date "+dateOfInvoice+" with total "+strconv.Itoa(int(math.Floor(invoiceItems[1].Units)))+" clicks at rate $0.35 on Ad: "+invoiceItems[1].AdTitle+" "+invoiceItems[1].AdId)
+	fmt.Printf("Price Views %v %v Clicks %v %v %v", viewsCost, invoiceItems[0].Cost, clicksCost, invoiceItems[1].Cost, stripeCustomer)
+	body2 := strings.NewReader(params2.Encode())
+
+	req2, err2 := http.NewRequest("POST", "https://api.stripe.com/v1/invoiceitems", body2)
+	if err2 != nil {
+		fmt.Printf("err2 %v", err2)
+		// handle err
+	}
+	req2.SetBasicAuth(stripeKey, "")
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	resp2, err2 := http.DefaultClient.Do(req2)
+	if err != nil && err2 != nil {
+		fmt.Printf("err %v err2 %v", err, err2)
+		// handle err
+	}
+	defer resp.Body.Close()
+	defer resp2.Body.Close()
+
+	// in, _ := stripeInvoice.New(invoiceParams)
+	// viewsParams := &stripe73.InvoiceItemParams{
+	// 	Customer: stripe.String(stripeCustomer),
+	// 	Amount:   FloatToInt64Pointer(invoiceItems[0].Cost * 1000),
+	// 	Invoice:  stripe73.String(in.ID),
+	// }
+	// viewsParams2 := &stripe73.InvoiceItemParams{
+	// 	Customer: stripe.String(stripeCustomer),
+	// 	Amount:   FloatToInt64Pointer(invoiceItems[1].Cost * 1000),
+	// 	Invoice:  stripe73.String(in.ID),
+	// }
+	// ii, _ := invoiceitem.New(viewsParams)
+	// ii2, _ := invoiceitem.New(viewsParams2)
+	// params.AutoAdvance = BoolPointer(true)
+	// in2, _ := stripeInvoice.FinalizeInvoice(in.ID, nil)
+	// fmt.Printf("Stripe Invoice %v %v %v %v", in2.Charge, in2.ID, ii.Amount, ii2.Amount, itap)
+	// params := &stripe.PaymentMethodListParams{
+	// 	Customer: stripe.String(stripeCustomer),
+	// 	Type:     stripe.String("card"),
+	// }
+	// i := paymentmethod.List(params)
+	// paymentMethods := []*stripe.PaymentMethod{}
+	// // Reverse Payment Methods to most recent first
+	// for i.Next() {
+	// 	pm := i.PaymentMethod()
+	// 	paymentMethods = append([]*stripe.PaymentMethod{pm}, paymentMethods...)
+	// }
+	// for i := 0; i < len(paymentMethods); i++ {
+	// 	fmt.Printf("Payment %v\n", paymentMethods[i].Created)
+	// }
+	return invoice
+}
+
+func makeInvoiceItems(invoiceItems []structs.InvoiceItem, viewsCost int64, clicksCost int64, dateOfInvoice string) []*stripe.InvoiceUpcomingInvoiceItemParams {
+	invoiceItemsToParams := []*stripe.InvoiceUpcomingInvoiceItemParams{}
+	invoiceItemsToParams = append(invoiceItemsToParams, &stripe.InvoiceUpcomingInvoiceItemParams{
+		Amount:      &viewsCost,
+		Currency:    StringPointer("USD"),
+		Description: StringPointer("Views for Advertising Services on date " + dateOfInvoice + "with total " + fmt.Sprintf("%f", invoiceItems[0].Units) + " views on Ad: " + invoiceItems[0].AdTitle + " " + invoiceItems[0].AdId),
+		InvoiceItem: StringPointer("Views"),
+		Quantity:    FloatToInt64Pointer(invoiceItems[0].Units),
+	})
+	invoiceItemsToParams = append(invoiceItemsToParams, &stripe.InvoiceUpcomingInvoiceItemParams{
+		Amount:      &clicksCost,
+		Currency:    StringPointer("USD"),
+		Description: StringPointer("Views for Advertising Services on date " + dateOfInvoice + "with total " + fmt.Sprintf("%f", invoiceItems[1].Units) + " clicks on Ad: " + invoiceItems[1].AdTitle + " " + invoiceItems[1].AdId),
+		InvoiceItem: StringPointer("Views"),
+		Quantity:    FloatToInt64Pointer(invoiceItems[0].Units),
+	})
+	return invoiceItemsToParams
+}
+
+func FloatToInt64Pointer(f float64) *int64 {
+	t := int64(f)
+	return &t
+}
+
+func BoolPointer(b bool) *bool {
+	return &b
+}
+
+func StringPointer(s string) *string {
+	return &s
 }

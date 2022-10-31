@@ -1,6 +1,8 @@
 package structs
 
-//"go.mongodb.org/mongo-driver/bson/primitive"
+import (
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 func main() {
 
@@ -162,12 +164,15 @@ type InvoiceItem struct {
 	Name    string
 	Details string
 	Data    string
-	Cost    float32
+	Units   float64
+	Cost    float64
 	Note    string
+	AdTitle string
+	AdId    string
 }
 
 type Invoice struct {
-	ID              string
+	ID              primitive.ObjectID `bson:"_id"`
 	Date            string
 	Note            string
 	Customer        string
@@ -176,10 +181,11 @@ type Invoice struct {
 	Payee           string
 	PayeeAddress    string
 	PayeeNetwork    string
-	Owed            float32
+	Owed            float64
 	Currency        string
 	Data            string
 	FootDetails     string
 	Thankyou        string
-	Paid            float32
+	Paid            float64
+	History         []string
 }
