@@ -173,6 +173,7 @@ type InvoiceItem struct {
 
 type Invoice struct {
 	ID              primitive.ObjectID `bson:"_id"`
+	StripeId        string
 	Date            string
 	Note            string
 	Customer        string

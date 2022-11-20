@@ -5,6 +5,7 @@ import (
 	"log"
 
 	// "fmt"
+	"reflect"
 	"strconv"
 )
 
@@ -131,6 +132,19 @@ func returnRawJsonBytes() []byte {
 	return jsonData
 }
 
+func JsonPointer(data []byte, key string, nested string, nested2 string) string {
+	var match string = "nomatch"
+	var jsonData interface{}
+	err := json.Unmarshal(data, &jsonData)
+	if err == nil {
+		m := jsonData.(map[string]interface{})
+		match = runSwitch(key, nested, nested2, m, -1, "")
+	} else {
+		log.Printf("Error %v", err)
+	}
+	return match
+}
+
 func GetS3Data(key string, nested string, nested2 string) string {
 	var match string = "nomatch"
 	var s3Data interface{}
@@ -191,10 +205,12 @@ func runSwitch(key string, nested string, nested2 string, m map[string]interface
 			continue
 		case interface{}:
 			// fmt.Println("Interface", a, bb, a, i)
-			n := bb.(map[string]interface{})
-			match := runSwitch(key, nested, nested2, n, i, a)
-			if match != "nomatch" {
-				return match
+			if reflect.TypeOf(bb).Kind() == reflect.Map {
+				n := bb.(map[string]interface{})
+				match := runSwitch(key, nested, nested2, n, i, a)
+				if match != "nomatch" {
+					return match
+				}
 			}
 		default:
 			break
