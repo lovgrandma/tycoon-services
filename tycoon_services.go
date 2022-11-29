@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"log"
 
 	// "github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 
 	"tycoon.systems/tycoon-services/ad/ad_queue"
 	ad_workers "tycoon.systems/tycoon-services/ad/ad_queue/workers"
+	"tycoon.systems/tycoon-services/s3credentials"
 	"tycoon.systems/tycoon-services/security"
 	"tycoon.systems/tycoon-services/sms/sms_queue"
 	sms_workers "tycoon.systems/tycoon-services/sms/sms_queue/workers"
@@ -23,6 +25,7 @@ import (
 
 	"github.com/go-co-op/gocron"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	adpb "tycoon.systems/tycoon-services/ad"
 	pb "tycoon.systems/tycoon-services/sms"
 	vpb "tycoon.systems/tycoon-services/video"
@@ -39,6 +42,8 @@ const (
 
 var (
 	supportedAdOrigins = []structs.Origin{{"https://www.tycoon.systems"}, {"www.tycoon.systems"}, {"https://imasdk.googleapis.com"}, {"imasdk.googleapis.com"}, {"http://localhost:3000"}, {"localhost:3000"}, {"https://tycoon-systems-client.local:3000"}, {"tycoon-systems-client.local:3000"}, {"https://tycoon-systems-client.local"}, {"tycoon-systems-client.local"}}
+	devEnv             = s3credentials.GetS3Data("app", "dev", "")
+	sslPath            = s3credentials.GetS3Data("app", "sslPath", "")
 )
 
 type SmsManagementServer struct {
@@ -126,12 +131,39 @@ func (v *VideoManegmentServer) CreateNewVideoUpload(ctx context.Context, in *vpb
 	return &vpb.Video{Status: "Bad Request", ID: "Tycoon Services", Socket: "null", Destination: "null", Filename: "null", Path: "null"}, err
 }
 
+func loadTLSCredentials() (credentials.TransportCredentials, error) {
+	// Load server's certificate and private key
+	serverCert, err := tls.LoadX509KeyPair(sslPath+"minipost-server-certificate.crt", sslPath+"minipost-server-certificate.crt")
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the credentials and return it
+	config := &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.NoClientCert,
+	}
+
+	return credentials.NewTLS(config), nil
+}
+
 func main() {
 	lis, err := net.Listen("tcp", port) // Server for ingesting SMS and general requests
 	if err != nil {
 		log.Fatalf("Failed to listen on %v: %v", port, err)
 	}
-	s := grpc.NewServer()
+	var s *grpc.Server
+	if devEnv == "false" {
+		tlsCredentials, err := loadTLSCredentials()
+		if err != nil {
+			log.Fatal("Cannot load TLS credentials (Main Server): ", err)
+		}
+		s = grpc.NewServer(
+			grpc.Creds(tlsCredentials),
+		)
+	} else {
+		s = grpc.NewServer()
+	}
 	pb.RegisterSmsManagementServer(s, &SmsManagementServer{})
 	go newVideoServer()                  // Server for ingesting video job requests
 	go newAdServer()                     // Server for ingesting ad job requests
@@ -233,13 +265,24 @@ func newVideoServer() *grpc.Server {
 	if err != nil {
 		log.Fatalf("Failed to listen on %v: %v", videoPort, err)
 	}
-	v := grpc.NewServer()
+	var v *grpc.Server
+	if devEnv == "false" {
+		tlsCredentials, err := loadTLSCredentials()
+		if err != nil {
+			log.Fatal("Cannot load TLS credentials (Main Server): ", err)
+		}
+		v = grpc.NewServer(
+			grpc.Creds(tlsCredentials),
+		)
+	} else {
+		v = grpc.NewServer()
+	}
 	vpb.RegisterVideoManagementServer(v, &VideoManegmentServer{})
 	log.Printf("Video Server listening at %v", lis2.Addr())
 	if err := v.Serve(lis2); err != nil {
 		log.Fatalf("Failed to run Video server: %v", err)
 	}
-	return grpc.NewServer()
+	return v
 }
 
 func newAdServer() *grpc.Server {
@@ -247,13 +290,24 @@ func newAdServer() *grpc.Server {
 	if err != nil {
 		log.Fatalf("Failed to listen on %v: %v", adPort, err)
 	}
-	a := grpc.NewServer()
+	var a *grpc.Server
+	if devEnv == "false" {
+		tlsCredentials, err := loadTLSCredentials()
+		if err != nil {
+			log.Fatal("Cannot load TLS credentials (Main Server): ", err)
+		}
+		a = grpc.NewServer(
+			grpc.Creds(tlsCredentials),
+		)
+	} else {
+		a = grpc.NewServer()
+	}
 	adpb.RegisterAdManagementServer(a, &AdManagementServer{})
 	log.Printf("Ad Server listening at %v", lis3.Addr())
 	if err := a.Serve(lis3); err != nil {
 		log.Fatalf("Failed to run Ad server: %v", err)
 	}
-	return grpc.NewServer()
+	return a
 }
 
 func serverCronRoutines() {
