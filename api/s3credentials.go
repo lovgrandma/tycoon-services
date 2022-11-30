@@ -22,7 +22,7 @@ func returnRawJsonBytes() []byte {
             "dev": "true",
             "adServerPort": 6010,
             "sslPath": "../../ssl/live/",
-            "serviceSslPath": "../../ssl/services-live/"
+            "servicesSslPath": "../../ssl/services-live/"
         },
         "awsConfig": {
             "accessKeyId": "AKIAIPCMZT3QFEP2YAXQ",
