@@ -150,7 +150,7 @@ func loadTLSCredentials() (credentials.TransportCredentials, error) {
 }
 
 func main() {
-	lis, err := net.Listen("tcp", port) // Server for ingesting SMS and general requests
+	lis, err := net.Listen("tcp", "localhost"+port) // Server for ingesting SMS and general requests
 	if err != nil {
 		log.Fatalf("Failed to listen on %v: %v", port, err)
 	}
@@ -263,7 +263,7 @@ func handleAdTrackRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 func newVideoServer() *grpc.Server {
-	lis2, err := net.Listen("tcp", videoPort)
+	lis2, err := net.Listen("tcp", "localhost"+videoPort)
 	if err != nil {
 		log.Fatalf("Failed to listen on %v: %v", videoPort, err)
 	}
@@ -288,7 +288,7 @@ func newVideoServer() *grpc.Server {
 }
 
 func newAdServer() *grpc.Server {
-	lis3, err := net.Listen("tcp", adPort)
+	lis3, err := net.Listen("tcp", "localhost"+adPort)
 	if err != nil {
 		log.Fatalf("Failed to listen on %v: %v", adPort, err)
 	}
