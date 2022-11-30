@@ -134,7 +134,7 @@ func (v *VideoManegmentServer) CreateNewVideoUpload(ctx context.Context, in *vpb
 
 func loadTLSCredentials() (credentials.TransportCredentials, error) {
 	// Load server's certificate and private key
-	serverCert, err := tls.LoadX509KeyPair(servicesSslPath+"server.crt", sslPath+"server.key")
+	serverCert, err := tls.LoadX509KeyPair(servicesSslPath+"server.crt", servicesSslPath+"server.key")
 	if err != nil {
 		return nil, err
 	}
