@@ -45,6 +45,7 @@ var (
 	devEnv             = s3credentials.GetS3Data("app", "dev", "")
 	sslPath            = s3credentials.GetS3Data("app", "sslPath", "")
 	servicesSslPath    = s3credentials.GetS3Data("app", "servicesSslPath", "")
+	goodServiceSsl     = s3credentials.GetS3Data("app", "goodServiceSsl", "")
 )
 
 type SmsManagementServer struct {
@@ -154,7 +155,7 @@ func main() {
 		log.Fatalf("Failed to listen on %v: %v", port, err)
 	}
 	var s *grpc.Server
-	if devEnv == "false" {
+	if devEnv == "false" && goodServiceSsl == "true" {
 		tlsCredentials, err := loadTLSCredentials()
 		if err != nil {
 			log.Fatal("Cannot load TLS credentials (Main Server): ", err)
@@ -267,7 +268,7 @@ func newVideoServer() *grpc.Server {
 		log.Fatalf("Failed to listen on %v: %v", videoPort, err)
 	}
 	var v *grpc.Server
-	if devEnv == "false" {
+	if devEnv == "false" && goodServiceSsl == "true" {
 		tlsCredentials, err := loadTLSCredentials()
 		if err != nil {
 			log.Fatal("Cannot load TLS credentials (Main Server): ", err)
@@ -292,7 +293,7 @@ func newAdServer() *grpc.Server {
 		log.Fatalf("Failed to listen on %v: %v", adPort, err)
 	}
 	var a *grpc.Server
-	if devEnv == "false" {
+	if devEnv == "false" && goodServiceSsl == "true" {
 		tlsCredentials, err := loadTLSCredentials()
 		if err != nil {
 			log.Fatal("Cannot load TLS credentials (Main Server): ", err)
