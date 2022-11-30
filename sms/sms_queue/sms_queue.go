@@ -1,65 +1,71 @@
 package sms_queue
 
 import (
-	"tycoon.systems/tycoon-services/s3credentials"
+	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
+
+	"github.com/hibiken/asynq"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"context"
+	"tycoon.systems/tycoon-services/s3credentials"
 	"tycoon.systems/tycoon-services/structs"
-	"github.com/hibiken/asynq"
-	"reflect"
-	"encoding/json"
-	"fmt"
+
 	// "strings"
 	"log"
+
 	"github.com/twilio/twilio-go"
 	openapi "github.com/twilio/twilio-go/rest/api/v2010"
+
 	// notifyapi "github.com/twilio/twilio-go/rest/notify/v1"
-	messagingapi "github.com/twilio/twilio-go/rest/messaging/v1"
-	"github.com/go-redis/redis/v8"
-	"tycoon.systems/tycoon-services/sms/sms_utility"
 	"time"
-	
-	pb "tycoon.systems/tycoon-services/sms"
-	"google.golang.org/grpc"
+
+	"github.com/go-redis/redis/v8"
+	messagingapi "github.com/twilio/twilio-go/rest/messaging/v1"
+	"tycoon.systems/tycoon-services/sms/sms_utility"
+
 	"os"
+
+	"google.golang.org/grpc"
+	pb "tycoon.systems/tycoon-services/sms"
 )
 
 var (
-	uri = s3credentials.GetS3Data("mongo", "addressAuth", "")
+	uri        = s3credentials.GetS3Data("mongo", "addressAuth", "")
 	credential = options.Credential{
 		AuthSource: "admin",
-		Username: s3credentials.GetS3Data("mongo", "u", ""),
-		Password: s3credentials.GetS3Data("mongo", "p", ""),
+		Username:   s3credentials.GetS3Data("mongo", "u", ""),
+		Password:   s3credentials.GetS3Data("mongo", "p", ""),
 	}
 	clientOpts = options.Client().ApplyURI(uri).
-   		SetAuth(credential)
-	client, err = mongo.Connect(context.TODO(), clientOpts)
+			SetAuth(credential)
+	client, err  = mongo.Connect(context.TODO(), clientOpts)
 	jobQueueAddr = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_queue_port", "")
-	jobClient = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
-	rdb = redis.NewClient(&redis.Options{
-        Addr:     s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "mpstnumbersport", ""),
-        Password: "", // no password set
-        DB:       0,  // use default DB
-    })
+	jobClient    = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
+	rdb          = redis.NewClient(&redis.Options{
+		Addr:     s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "mpstnumbersport", ""),
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 	returnJobResultPort = "6001"
 	returnJobResultAddr = s3credentials.GetS3Data("app", "prodhost", "")
 )
 
 const (
-	TypeSmsDelivery		= "sms:deliver"
+	TypeSmsDelivery          = "sms:deliver"
 	_phoneAlreadyListedCheck = "Phone Number or Short Code is already in the Messaging Service"
 )
 
 func main() {
-	
+
 }
 
 func ProvisionSmsJob(msg structs.Msg) string {
 	if reflect.TypeOf(msg.Content).Kind() == reflect.String &&
-	reflect.TypeOf(msg.From).Kind() == reflect.String &&
-	reflect.TypeOf(msg.JobId).Kind() == reflect.String {
+		reflect.TypeOf(msg.From).Kind() == reflect.String &&
+		reflect.TypeOf(msg.JobId).Kind() == reflect.String {
 		task, err := NewSmsDeliveryTask(msg)
 		if err != nil {
 			log.Printf("Could not create Sms Delivery task at Task Creation: %v", err)
@@ -131,25 +137,25 @@ func PerformSmsDelivery(msg structs.Msg) error {
 		return fmt.Errorf("failure %v", err)
 	}
 	switch reflect.TypeOf(record.Subs).Kind() {
-		case reflect.Slice:
-			s := reflect.ValueOf(record.Subs)
-			for i := 0; i < s.Len(); i++ {
-				if reflect.TypeOf(record.Subs[i]) == reflect.TypeOf(structs.FromObj{}) { // Records must be in structs.FromObj format
-					var to string = record.Subs[i].From
-					params := &openapi.CreateMessageParams{
-						To: &to,
-						From: &msg.From,
-						Body: &msg.Content,
-					}
-					_, err := twilioClient.ApiV2010.CreateMessage(params)
-					if err != nil {
-						fmt.Printf("Err sending message to %v. Err: %v", to, err)
-					}
-					UpdateRedisConverstaion(to, msg.From, msg.Content, i)
+	case reflect.Slice:
+		s := reflect.ValueOf(record.Subs)
+		for i := 0; i < s.Len(); i++ {
+			if reflect.TypeOf(record.Subs[i]) == reflect.TypeOf(structs.FromObj{}) { // Records must be in structs.FromObj format
+				var to string = record.Subs[i].From
+				params := &openapi.CreateMessageParams{
+					To:   &to,
+					From: &msg.From,
+					Body: &msg.Content,
 				}
+				_, err := twilioClient.ApiV2010.CreateMessage(params)
+				if err != nil {
+					fmt.Printf("Err sending message to %v. Err: %v", to, err)
+				}
+				UpdateRedisConverstaion(to, msg.From, msg.Content, i)
 			}
-		default:
-			fmt.Printf("Invalid subs record type, expecting structs.FromObj")
+		}
+	default:
+		fmt.Printf("Invalid subs record type, expecting structs.FromObj")
 	}
 	RemovePhoneNumberFromService(*twilioClient, *service.Sid, *createdNumber.Sid)
 	DeleteService(*twilioClient, *service.Sid)
@@ -184,7 +190,7 @@ func UpdateRedisConverstaion(to string, from string, content string, i int) erro
 		newLog["content"] = content
 		newLog["timestamp"] = t.Format("2006/01/02 3:04:05 PM")
 		chatLog.Log = append(chatLog.Log, newLog)
-		safeChatLog := make(map[string]interface{}) 
+		safeChatLog := make(map[string]interface{})
 		safeChatLog["id"] = chatLog.ID
 		safeChatLog["users"] = chatLog.Users
 		safeChatLog["log"] = chatLog.Log
@@ -200,7 +206,7 @@ func returnFinishedJobReport(msg structs.Msg) {
 	if os.Getenv("dev") == "true" {
 		useReturnJobResultAddr = "localhost"
 	}
-	conn, err := grpc.Dial(useReturnJobResultAddr + ":" + returnJobResultPort, grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.Dial(useReturnJobResultAddr+":"+returnJobResultPort, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		fmt.Printf("Err: %v", err)
 	}
