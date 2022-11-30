@@ -44,6 +44,7 @@ var (
 	supportedAdOrigins = []structs.Origin{{"https://www.tycoon.systems"}, {"www.tycoon.systems"}, {"https://imasdk.googleapis.com"}, {"imasdk.googleapis.com"}, {"http://localhost:3000"}, {"localhost:3000"}, {"https://tycoon-systems-client.local:3000"}, {"tycoon-systems-client.local:3000"}, {"https://tycoon-systems-client.local"}, {"tycoon-systems-client.local"}}
 	devEnv             = s3credentials.GetS3Data("app", "dev", "")
 	sslPath            = s3credentials.GetS3Data("app", "sslPath", "")
+	servicesSslPath    = s3credentials.GetS3Data("app", "servicesSslPath", "")
 )
 
 type SmsManagementServer struct {
@@ -133,7 +134,7 @@ func (v *VideoManegmentServer) CreateNewVideoUpload(ctx context.Context, in *vpb
 
 func loadTLSCredentials() (credentials.TransportCredentials, error) {
 	// Load server's certificate and private key
-	serverCert, err := tls.LoadX509KeyPair(sslPath+"minipost-server-certificate.crt", sslPath+"minipost-server-certificate.crt")
+	serverCert, err := tls.LoadX509KeyPair(servicesSslPath+"server.crt", sslPath+"server.key")
 	if err != nil {
 		return nil, err
 	}
