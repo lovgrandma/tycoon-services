@@ -34,7 +34,7 @@ import (
 )
 
 var (
-	uri        = s3credentials.GetS3Data("mongo", "addressAuth", "")
+	uri        = s3credentials.GetS3Data("mongo", "address", "")
 	credential = options.Credential{
 		AuthSource: "admin",
 		Username:   s3credentials.GetS3Data("mongo", "u", ""),
