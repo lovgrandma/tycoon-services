@@ -2,3 +2,4 @@ x264_lookahead.clbin
 tycoon-services
 .env
 deploy
+api/s3credentialsdata.go
