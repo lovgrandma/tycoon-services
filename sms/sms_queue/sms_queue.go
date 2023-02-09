@@ -49,7 +49,7 @@ var (
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
-	returnJobResultPort = "6001"
+	returnJobResultPort = s3credentials.GetS3Data("app", "services", "smsServer")
 	returnJobResultAddr = s3credentials.GetS3Data("app", "prodhost", "")
 )
 

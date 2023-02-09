@@ -8,6 +8,7 @@ require (
 	tycoon.systems/tycoon-services/ad v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/ad/ad_queue v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/ad/ad_queue/workers v0.0.0-00010101000000-000000000000
+	tycoon.systems/tycoon-services/s3credentials v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/security v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/sms v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/sms/sms_queue v0.0.0-00010101000000-000000000000
@@ -72,7 +73,6 @@ require (
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4 // indirect
 	google.golang.org/genproto v0.0.0-20220503193339-ba3ae3f07e29 // indirect
 	google.golang.org/protobuf v1.28.0 // indirect
-	tycoon.systems/tycoon-services/s3credentials v0.0.0-00010101000000-000000000000 // indirect
 	tycoon.systems/tycoon-services/sms/sms_utility v0.0.0-00010101000000-000000000000 // indirect
 )
 

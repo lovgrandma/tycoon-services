@@ -62,7 +62,7 @@ var (
 	jobQueueAddr                        = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_ad_queue_port", "")
 	adAnalyticsAddr                     = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_ad_analytics_port", "")
 	jobClient                           = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
-	returnJobResultPort                 = "6005"
+	returnJobResultPort                 = s3credentials.GetS3Data("app", "services", "adServer")
 	returnJobResultAddr                 = s3credentials.GetS3Data("app", "prodhost", "")
 	vastUploadFolderPath                = "../tycoon-services-vast-ad-generation/"
 	s3VideoEndpoint                     = s3credentials.GetS3Data("awsConfig", "buckets", "tycoon-systems-video")
