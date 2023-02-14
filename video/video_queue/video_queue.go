@@ -37,7 +37,7 @@ var (
 	client, err         = mongo.Connect(context.TODO(), clientOpts)
 	jobQueueAddr        = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_video_queue_port", "")
 	jobClient           = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
-	returnJobResultPort = "6003"
+	returnJobResultPort = s3credentials.GetS3Data("app", "services", "videoServer")
 	returnJobResultAddr = s3credentials.GetS3Data("app", "prodhost", "")
 )
 

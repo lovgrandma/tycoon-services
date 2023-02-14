@@ -35,10 +35,6 @@ import (
 
 const (
 	serviceAddress = "127.0.0.1"
-	port           = ":6000"
-	videoPort      = ":6002"
-	adPort         = ":6004"
-	adServerPort   = ":6010"
 )
 
 var (
@@ -47,6 +43,10 @@ var (
 	sslPath            = s3credentials.GetS3Data("app", "sslPath", "")
 	servicesSslPath    = s3credentials.GetS3Data("app", "servicesSslPath", "")
 	goodServiceSsl     = s3credentials.GetS3Data("app", "goodServiceSsl", "")
+	port               = ":" + s3credentials.GetS3Data("app", "services", "smsClient")
+	videoPort          = ":" + s3credentials.GetS3Data("app", "services", "videoClient")
+	adPort             = ":" + s3credentials.GetS3Data("app", "services", "adClient")
+	adServerPort       = ":" + s3credentials.GetS3Data("app", "adServerPort", "")
 )
 
 type SmsManagementServer struct {
