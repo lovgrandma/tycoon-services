@@ -72,13 +72,8 @@ require (
 	golang.org/x/sys v0.4.0 // indirect
 	golang.org/x/text v0.6.0 // indirect
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4 // indirect
-<<<<<<< HEAD
 	google.golang.org/genproto v0.0.0-20230110181048-76db0878b65f // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
-=======
-	google.golang.org/genproto v0.0.0-20220503193339-ba3ae3f07e29 // indirect
-	google.golang.org/protobuf v1.28.0 // indirect
->>>>>>> 78a12c1c80509a6ec3569ab3618e871fd0ecfea6
 	tycoon.systems/tycoon-services/sms/sms_utility v0.0.0-00010101000000-000000000000 // indirect
 )
 
