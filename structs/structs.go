@@ -190,3 +190,6 @@ type Invoice struct {
 	Paid            float64
 	History         []string
 }
+
+type EmptyObject struct {
+}

@@ -144,47 +144,51 @@ func PackageManifest(vid *vpb.Video, media []structs.MediaItem, del bool) ([]str
 	// reRaw := regexp.MustCompile(`([a-zA-Z0-9].*)-([a-zA-Z0-9].*)-raw(\.[a-zA-Z0-9].*)`) // 15cf28e1a0a048f6a2deecee161e4f8a-720-raw.mp4
 	var liveMediaItems []structs.MediaItem
 	for i := 0; i < len(media); i++ {
-		if media[i].Type == "text" && media[i].Url != "bad" {
-			// Do not add subtitle references to manifest for now using shaka packager. Functionality can be done manually using a script to run after completion of this process. For now client side will
-			// manually grab vtt files from media property stored on record signified by operation bellow
-			liveMediaItems = append(liveMediaItems, structs.MediaItem{
-				Type: "text",
-				Url:  media[i].Url,
-			})
-			media[i].Url = "" // Ignore file deletion here since we are not creating new files from "raw" files for vtt.
-		} else if media[i].Url != "bad" {
-			args := ""
-			matchPath := re.FindAllStringSubmatch(media[i].Url, -1)
-			// matchPath2 := reRaw.FindAllStringSubmatch(media[i].Url, -1)
-			p := matchPath[0][1] + matchPath[0][2]
-			args = args + "in=" + media[i].Url + ",stream=" + media[i].Type + ",output=" + p
-			liveMediaItems = append(liveMediaItems, structs.MediaItem{
-				Type: media[i].Type,
-				Url:  p,
-			})
-			if media[i].Type == "audio" {
-				p2 := matchPath[0][1] + ".m3u8"
-				args = args + ",playlist_name=" + p2
+		var m structs.MediaItem
+		if media[i] != m {
+			if media[i].Type == "text" && media[i].Url != "bad" {
+				// Do not add subtitle references to manifest for now using shaka packager. Functionality can be done manually using a script to run after completion of this process. For now client side will
+				// manually grab vtt files from media property stored on record signified by operation bellow
 				liveMediaItems = append(liveMediaItems, structs.MediaItem{
-					Type: "hls-playlist",
-					Url:  p2,
+					Type: "text",
+					Url:  media[i].Url,
 				})
-				args = args + ",hls_group_id=audio,hls_name=ENGLISH"
-			} else {
-				p2 := matchPath[0][1] + "-" + media[i].Type + ".m3u8"
-				args = args + ",playlist_name=" + p2
+				media[i].Url = "" // Ignore file deletion here since we are not creating new files from "raw" files for vtt.
+			} else if media[i].Url != "bad" {
+				args := ""
+				matchPath := re.FindAllStringSubmatch(media[i].Url, -1)
+				// matchPath2 := reRaw.FindAllStringSubmatch(media[i].Url, -1)
+				fmt.Printf("Match Path %v Media %v", matchPath, media[i])
+				p := matchPath[0][1] + matchPath[0][2]
+				args = args + "in=" + media[i].Url + ",stream=" + media[i].Type + ",output=" + p
 				liveMediaItems = append(liveMediaItems, structs.MediaItem{
-					Type: "hls-playlist",
-					Url:  p2,
+					Type: media[i].Type,
+					Url:  p,
 				})
-				p3 := matchPath[0][1] + "-" + media[i].Type + "_iframe.m3u8"
-				args = args + ",iframe_playlist_name=" + p3
-				liveMediaItems = append(liveMediaItems, structs.MediaItem{
-					Type: "iframe-hls-playlist",
-					Url:  p3,
-				})
+				if media[i].Type == "audio" {
+					p2 := matchPath[0][1] + ".m3u8"
+					args = args + ",playlist_name=" + p2
+					liveMediaItems = append(liveMediaItems, structs.MediaItem{
+						Type: "hls-playlist",
+						Url:  p2,
+					})
+					args = args + ",hls_group_id=audio,hls_name=ENGLISH"
+				} else {
+					p2 := matchPath[0][1] + "-" + media[i].Type + ".m3u8"
+					args = args + ",playlist_name=" + p2
+					liveMediaItems = append(liveMediaItems, structs.MediaItem{
+						Type: "hls-playlist",
+						Url:  p2,
+					})
+					p3 := matchPath[0][1] + "-" + media[i].Type + "_iframe.m3u8"
+					args = args + ",iframe_playlist_name=" + p3
+					liveMediaItems = append(liveMediaItems, structs.MediaItem{
+						Type: "iframe-hls-playlist",
+						Url:  p3,
+					})
+				}
+				argsSlice = append(argsSlice, args)
 			}
-			argsSlice = append(argsSlice, args)
 		}
 	}
 	var expectedMpdPath string = vid.GetID() + "-mpd.mpd"

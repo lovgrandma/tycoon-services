@@ -3,3 +3,4 @@ tycoon-services
 .env
 deploy
 api/s3credentialsdata.go
+tycoon-services.exe

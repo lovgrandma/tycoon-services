@@ -5,6 +5,7 @@ go 1.18
 require (
 	go.mongodb.org/mongo-driver v1.11.2
 	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
+	tycoon.systems/tycoon-services/s3credentials v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/sms/sms_queue v0.0.0-00010101000000-000000000000
 	tycoon.systems/tycoon-services/structs v0.0.0-00010101000000-000000000000
 )
@@ -36,7 +37,6 @@ require (
 	google.golang.org/genproto v0.0.0-20230110181048-76db0878b65f // indirect
 	google.golang.org/grpc v1.53.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
-	tycoon.systems/tycoon-services/s3credentials v0.0.0-00010101000000-000000000000 // indirect
 	tycoon.systems/tycoon-services/sms v0.0.0-00010101000000-000000000000 // indirect
 	tycoon.systems/tycoon-services/sms/sms_utility v0.0.0-00010101000000-000000000000 // indirect
 )
