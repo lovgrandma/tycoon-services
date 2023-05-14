@@ -101,6 +101,20 @@ func PerformVideoProcess(vid *vpb.Video) error {
 	if alreadyRunning {
 		return nil
 	}
+	defaultTitle, defaultDescription, defaultDuration, err := transcode.ProbeDefaultMetadata(vid)
+	fmt.Printf("Defaults %v %v %v %v\n", defaultTitle, defaultDescription, defaultDuration, err)
+	var vidDefaults structs.Video
+	if err == nil {
+		vidDefaults = structs.Video{
+			ID:          vid.GetID(),
+			Title:       defaultTitle,
+			Description: defaultDescription,
+			Duration:    defaultDuration,
+		}
+		transcode.FindOneAndUpdateVideoField(vidDefaults, "duration", vidDefaults.Duration)
+		transcode.FindOneAndUpdateVideoField(vidDefaults, "title", vidDefaults.Title)
+		transcode.FindOneAndUpdateVideoField(vidDefaults, "description", vidDefaults.Description)
+	}
 	var transcodedMedia []structs.MediaItem = transcode.TranscodeAudioProcess(vid, []structs.MediaItem{}) // Transcode Main Audio included in Video File -> Transcode Video Files -> Transcode Subtitles
 	fmt.Printf("Transcoded Media so far: %v\n", transcodedMedia)
 	var thumbtrack []structs.Thumbnail
@@ -109,8 +123,11 @@ func PerformVideoProcess(vid *vpb.Video) error {
 	var liveMediaItems []structs.MediaItem
 	liveMediaItems, _ = transcode.PackageManifest(vid, transcodedMedia, true) // Package manifest files
 	liveMediaItems = transcode.FindDefaultThumbnail(thumbtrack, liveMediaItems)
-	doc, _ := transcode.UpdateMongoRecord(vid, liveMediaItems, "upload", thumbtrack, false)    // Update record
-	err := transcode.UploadToServers(liveMediaItems, vid.GetDestination(), "video/", thumbDir) // Send to Streaming servers
+	doc, err := transcode.UpdateMongoRecord(vid, liveMediaItems, "upload", thumbtrack, false) // Update record
+	if err != nil {
+		fmt.Printf("Error Transcoding %v", err)
+	}
+	err = transcode.UploadToServers(liveMediaItems, vid.GetDestination(), "video/", thumbDir) // Send to Streaming servers
 	if err != nil {
 		fmt.Printf("issue with uploading to S3 %v\n", err)
 	}

@@ -29,6 +29,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"tycoon.systems/tycoon-services/s3credentials"
+	"tycoon.systems/tycoon-services/security"
 	"tycoon.systems/tycoon-services/structs"
 	vpb "tycoon.systems/tycoon-services/video"
 )
@@ -97,7 +98,7 @@ func TranscodeSingleAudio(vid *vpb.Video, media structs.MediaItem, version strin
 			"b:a": "256k",
 			"ac":  channels,
 		}).
-		ErrorToStdOut().
+		// ErrorToStdOut().
 		Run()
 	if err != nil {
 		fmt.Printf("Issue with transcoding single audio %v\nPath: %v\nOutput: %v\n", err, vid.GetPath(), vid.GetDestination()+vid.GetID()+"-"+version+"-raw.mp4")
@@ -125,7 +126,7 @@ func TranscodeSingleVideo(vid *vpb.Video, media structs.MediaItem, resolution in
 			"movflags":    "+faststart", // Move moov data to beginning of video with second pass for faster web start
 			"x264opts":    "opencl",     // Enable opencl usage to improve speed of trancoding using GPU
 		}).
-		ErrorToStdOut().
+		// ErrorToStdOut().
 		Run()
 	if err != nil {
 		fmt.Printf("Issue with transcoding Video %v\nPath: %v\nOutput: %v\n", err, vid.GetPath(), vid.GetDestination()+vid.GetID()+"-"+curRes+"-raw.mp4")
@@ -226,47 +227,155 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 	if client == nil {
 		return false
 	}
-	videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
-	record := &structs.Video{}
-	err := videos.FindOne(context.TODO(), bson.D{{"_id", vid.GetID()}}).Decode(&record) // Get from video data
-	if err == mongo.ErrNoDocuments {
-		defaultTitle, defaultDescription := ProbeDefaultMetadata(vid)
-		document := structs.Video{
-			ID:          vid.GetID(),
-			Author:      vid.GetSocket(),
-			Status:      status,
-			Publish:     -1,
-			Creation:    int(time.Now().UnixNano() / 1000000),
-			Mpd:         "",
-			Hls:         "",
-			Media:       []structs.MediaItem{},
-			Thumbnail:   "",
-			Thumbtrack:  []structs.Thumbnail{},
-			Title:       defaultTitle,
-			Description: defaultDescription,
-			Tags:        make([]interface{}, 0),
-			Production:  "",
-			Cast:        make([]interface{}, 0),
-			Directors:   make([]interface{}, 0),
-			Writers:     make([]interface{}, 0),
-			Timeline:    make([]interface{}, 0),
-			Duration:    FindDuration(vid),
+	query := `
+		query FindOneVideo($field: String!, $value: String!) {
+			findOneVideo(field: $field, value: $value) {
+				id
+				author
+				status
+				publish
+				creation
+				mpd
+				hls
+				media
+				thumbnail
+				thumbtrack
+				title
+				description
+				tags
+				production
+				cast
+				directors
+				writers
+				timeline
+				duration
+			}
 		}
-		videos.InsertOne(context.TODO(), document)
+	`
+	// Prepare the GraphQL request payload
+	payload := map[string]interface{}{
+		"query": query,
+		"variables": map[string]string{
+			"field": "id",
+			"value": vid.GetID(),
+		},
+	}
+
+	recordRaw, err := security.RunGraphqlQuery(payload, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneVideo")
+	var record structs.Video
+	if err != nil || recordRaw == nil || len(recordRaw) == 0 { // If no matching documents create new
+		defaultTitle, defaultDescription, duration, _ := ProbeDefaultMetadata(vid)
+		mut := `
+			mutation SetVideo($author: String, $status: String, $publish: String, $creation: String, $mpd: String, $hls: String, $thumbnail: String, $media: [JSON], $thumbtrack: [JSON], $title: String, $description: String, $tags: [String], $cast: [String], $production: String, $directors: [String], $writers: [String], $timeline: [JSON], $duration: String) {
+				setVideo(author: $author, status: $status, publish: $publish, creation: $creation, mpd: $mpd, hls: $hls, thumbnail: $thumbnail, media: $media, thumbtrack: $thumbtrack, title: $title, description: $description, tags: $tags, cast: $cast, production: $production, directors: $directors, writers: $writers, timeline: $timeline, duration: $duration) {
+					id
+					author
+					status
+					publish
+					creation
+					mpd
+					hls
+					media
+					thumbnail
+					thumbtrack
+					title
+					description
+					tags
+					production
+					cast
+					directors
+					writers
+					timeline
+					duration
+				}
+			}
+		`
+		payload2 := map[string]interface{}{
+			"query": mut,
+			"variables": map[string]interface{}{
+				"id":          vid.GetID(),
+				"author":      vid.GetSocket(),
+				"status":      status,
+				"publish":     "-1",
+				"creation":    time.Now().Format("2006-01-02T15:04:05-07:00"),
+				"mpd":         "",
+				"hls":         "",
+				"media":       []structs.MediaItem{},
+				"thumbnail":   "",
+				"thumbtrack":  []structs.Thumbnail{},
+				"title":       defaultTitle,
+				"description": defaultDescription,
+				"tags":        []interface{}{},
+				"production":  "",
+				"cast":        []interface{}{},
+				"directors":   []interface{}{},
+				"writers":     []interface{}{},
+				"timeline":    []interface{}{},
+				"duration":    duration,
+			},
+		}
+		_, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "setVideo")
+		if err != nil {
+			return true // record creation failed, dont attampt running
+		}
 		return false
 	} else {
+		fmt.Printf("Record Raw %v\n", recordRaw)
+		data, err := json.Marshal(recordRaw)
+		if err != nil {
+			return false
+		}
+		err = json.Unmarshal(data, &record)
+		if err != nil {
+			fmt.Println(err)
+			return false
+		}
 		if record.Status != "waiting" {
 			fmt.Printf("Job has already started processing. Preventing from running same task again. Current Status: %v. Exiting\n", record.Status)
 			return true
 		}
-		opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
-		var v structs.Video
-		videos.FindOneAndUpdate(
-			context.TODO(),
-			bson.D{{"_id", vid.GetID()}},
-			bson.M{"$set": bson.M{"status": status}},
-			opts).
-			Decode(&v)
+
+		mut := `
+			mutation FindOneAndUpdateVideo($field: String!, $value: String!, $fieldActionMatch: String!, $newValue: String!) {
+				findOneAndUpdateVideo(field: $field, value: $value, fieldActionMatch: $fieldActionMatch, newValue: $newValue) {
+					id
+					author
+					status
+					publish
+					creation
+					mpd
+					hls
+					media
+					thumbnail
+					thumbtrack
+					title
+					description
+					tags
+					production
+					cast
+					directors
+					writers
+					timeline
+					duration
+				}
+			}
+		`
+
+		payload2 := map[string]interface{}{
+			"query": mut,
+			"variables": map[string]string{
+				"field":            "id",
+				"value":            vid.GetID(),
+				"fieldActionMatch": "status",
+				"newValue":         status,
+			},
+		}
+
+		// findone and update
+		_, err = security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideo")
+		if err != nil {
+			return true // record creation failed, dont attampt running
+		}
 	}
 	fmt.Printf("Not running. Current Status: %v\n", record.Status)
 	return false
@@ -276,42 +385,133 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 	if client == nil {
 		return nil, fmt.Errorf("Database client connection unavailable %v\n", err)
 	}
-	videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
-	record := &structs.Video{}
-	err := videos.FindOne(context.TODO(), bson.D{{"_id", vid.GetID()}}).Decode(&record) // Get from phone number data
-	if err != nil {
-		fmt.Printf("Mongo Update Err %v\n", err)
+
+	query := `
+		query FindOneVideo($field: String!, $value: String!) {
+			findOneVideo(field: $field, value: $value) {
+				id
+				author
+				status
+				publish
+				creation
+				mpd
+				hls
+				media
+				thumbnail
+				thumbtrack
+				title
+				description
+				tags
+				production
+				cast
+				directors
+				writers
+				timeline
+				duration
+			}
+		}
+	`
+	// Prepare the GraphQL request payload
+	payload := map[string]interface{}{
+		"query": query,
+		"variables": map[string]string{
+			"field": "id",
+			"value": vid.GetID(),
+		},
 	}
-	if err == mongo.ErrNoDocuments {
-		defaultTitle, defaultDescription := ProbeDefaultMetadata(vid)
-		document := structs.Video{
-			ID:          vid.GetID(),
-			Author:      vid.GetSocket(),
-			Status:      status,
-			Publish:     -1,
-			Creation:    int(time.Now().UnixNano() / 1000000),
-			Mpd:         "",
-			Hls:         "",
-			Media:       media,
-			Thumbnail:   "",
-			Thumbtrack:  []structs.Thumbnail{},
-			Title:       defaultTitle,
-			Description: defaultDescription,
-			Tags:        make([]interface{}, 0),
-			Production:  "",
-			Cast:        make([]interface{}, 0),
-			Directors:   make([]interface{}, 0),
-			Writers:     make([]interface{}, 0),
-			Timeline:    make([]interface{}, 0),
-			Duration:    FindDuration(vid),
+
+	recordRaw, err := security.RunGraphqlQuery(payload, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneVideo")
+	fmt.Printf("Create Record %v %v\n", recordRaw, vid)
+	if err != nil || recordRaw == nil || len(recordRaw) == 0 {
+		fmt.Printf("Error %v", err)
+		defaultTitle, defaultDescription, duration, _ := ProbeDefaultMetadata(vid)
+
+		mut := `
+			mutation SetVideo($author: String, $status: String, $publish: String, $creation: String, $mpd: String, $hls: String, $thumbnail: String, $media: [JSON], $thumbtrack: [JSON], $title: String, $description: String, $tags: [String], $cast: [String], $production: String, $directors: [String], $writers: [String], $timeline: [JSON], $duration: String) {
+				setVideo(author: $author, status: $status, publish: $publish, creation: $creation, mpd: $mpd, hls: $hls, thumbnail: $thumbnail, media: $media, thumbtrack: $thumbtrack, title: $title, description: $description, tags: $tags, cast: $cast, production: $production, directors: $directors, writers: $writers, timeline: $timeline, duration: $duration) {
+					id
+					author
+					status
+					publish
+					creation
+					mpd
+					hls
+					media
+					thumbnail
+					thumbtrack
+					title
+					description
+					tags
+					production
+					cast
+					directors
+					writers
+					timeline
+					duration
+				}
+			}
+		`
+
+		payload2 := map[string]interface{}{
+			"query": mut,
+			"variables": map[string]interface{}{
+				"author":      vid.GetSocket(),
+				"status":      status,
+				"publish":     "-1",
+				"creation":    time.Now().Format("2006-01-02T15:04:05-07:00"),
+				"mpd":         "",
+				"hls":         "",
+				"media":       []structs.MediaItem{},
+				"thumbnail":   "",
+				"thumbtrack":  []structs.Thumbnail{},
+				"title":       defaultTitle,
+				"description": defaultDescription,
+				"tags":        []interface{}{},
+				"production":  "",
+				"cast":        []interface{}{},
+				"directors":   []interface{}{},
+				"writers":     []interface{}{},
+				"timeline":    []interface{}{},
+				"duration":    duration,
+			},
 		}
-		insertedDocument, err2 := videos.InsertOne(context.TODO(), document)
-		if err2 != nil {
-			return nil, err2
+
+		recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "setVideo")
+		var record structs.Video
+		if err != nil {
+			fmt.Printf("Error %v", err)
+			return nil, err // record creation failed, dont attampt running
 		}
-		return insertedDocument, nil
+		data, err := json.Marshal(recordRaw)
+		if err != nil {
+			fmt.Printf("Error %v", err)
+			return nil, err
+		}
+		err = json.Unmarshal(data, &record)
+		if err != nil {
+			fmt.Printf("Error %v", err)
+			return nil, err
+		}
+		fmt.Printf("Record Created %v", record)
+		return record, nil
 	} else {
+		var record structs.Video
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+			return nil, err // record creation failed, dont attampt running
+		}
+		data, err := json.Marshal(recordRaw)
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+			return nil, err
+		}
+		err = json.Unmarshal(data, &record)
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+			return nil, err
+		}
 		if record.Status != "processing" && status == "waiting" && once == true {
+			fmt.Printf("Not equal processing and is waiting\n")
 			return nil, nil
 		}
 		trimmedMediaData := media
@@ -319,51 +519,112 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 		if err == nil {
 			trimmedMediaData = m
 		}
-		document := structs.Video{ // Upsert document
-			ID:          vid.GetID(),
-			Author:      vid.GetSocket(),
-			Status:      status,
-			Publish:     -1,
-			Creation:    record.Creation,
-			Mpd:         FindMediaOfType(media, "mpd"),
-			Hls:         FindMediaOfType(media, "hls"),
-			Media:       trimmedMediaData,
-			Thumbnail:   FindMediaOfType(media, "thumbnail"),
-			Thumbtrack:  thumbtrack,
-			Title:       record.Title,
-			Description: record.Description,
-			Tags:        record.Tags,
-			Production:  record.Production,
-			Cast:        record.Cast,
-			Directors:   record.Directors,
-			Writers:     record.Writers,
-			Timeline:    record.Timeline,
-			Duration:    record.Duration,
+
+		mut := `
+			mutation FindOneAndUpdateVideoObject($field: String, $value: String, $author: String, $publish: String, $creation: String, $mpd: String, $hls: String, $thumbnail: String, $thumbtrack: [JSON], $description: String, $production: String, $directors: [String], $writers: [String], $duration: String, $timeline: [JSON], $cast: [String], $title: String, $tags: [String], $media: [JSON], $status: String) {
+				findOneAndUpdateVideoObject(field: $field, value: $value, author: $author, publish: $publish, creation: $creation, mpd: $mpd, hls: $hls, thumbnail: $thumbnail, thumbtrack: $thumbtrack, description: $description, production: $production, directors: $directors, writers: $writers, duration: $duration, timeline: $timeline, cast: $cast, title: $title, tags: $tags, media: $media, status: $status) {
+					id
+					author
+					status
+					publish
+					creation
+					mpd
+					hls
+					media
+					thumbnail
+					thumbtrack
+					title
+					description
+					tags
+					production
+					cast
+					directors
+					writers
+					timeline
+					duration
+				}
+			}
+		`
+		fmt.Printf("Record Print %v\n", record.Duration)
+
+		numCreation, err := strconv.ParseInt(record.Creation, 10, 64)
+		var formattedCreation string
+		if err != nil {
+			formattedCreation = "-1"
+		} else {
+			formattedCreation = time.Unix(0, numCreation*int64(time.Millisecond)).Format("2006-01-02 15:04:05.000-07")
 		}
-		opts := options.FindOneAndUpdate().SetUpsert(true)
-		opts = options.FindOneAndUpdate().SetReturnDocument(options.After)
-		newDoc, _ := toDoc(document)
-		var v structs.Video
-		videos.FindOneAndUpdate(
-			context.TODO(),
-			bson.D{{"_id", vid.GetID()}},
-			bson.M{"$set": newDoc},
-			opts).
-			Decode(&v)
-		return v, nil
+
+		payload2 := map[string]interface{}{
+			"query": mut,
+			"variables": map[string]interface{}{
+				"field":       "id",
+				"value":       vid.GetID(),
+				"author":      vid.GetSocket(),
+				"status":      status,
+				"publish":     json.RawMessage("null"),
+				"creation":    formattedCreation,
+				"mpd":         FindMediaOfType(media, "mpd"),
+				"hls":         FindMediaOfType(media, "hls"),
+				"media":       trimmedMediaData,
+				"thumbnail":   FindMediaOfType(media, "thumbnail"),
+				"thumbtrack":  thumbtrack,
+				"title":       record.Title,
+				"description": record.Description,
+				"tags":        record.Tags,
+				"production":  record.Production,
+				"cast":        record.Cast,
+				"directors":   record.Directors,
+				"writers":     record.Writers,
+				"timeline":    record.Timeline,
+				"duration":    record.Duration,
+			},
+		}
+		recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideoObject")
+		var record2 structs.Video
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+			return nil, err // record creation failed, dont attampt running
+		}
+		data2, err := json.Marshal(recordRaw)
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+			return nil, err
+		}
+		err = json.Unmarshal(data2, &record2)
+		if err != nil {
+			fmt.Printf("Error %v\n", err)
+			return nil, err
+		}
+		return record2, nil
 	}
-	return nil, nil
 }
 
-func ProbeDefaultMetadata(vid *vpb.Video) (string, string) {
+func ProbeDefaultMetadata(vid *vpb.Video) (string, string, string, error) {
 	var title string = ""
 	var description string = ""
-	data, err := ffmpeg.Probe(vid.GetPath())
+	var duration string = ""
+	fmt.Printf("Video Path Probe Default %v\n", vid.GetPath())
+	var data string
+	var err error
+	i := 0
+	for {
+		// Code to be executed in the loop
+		data, err = ffmpeg.Probe(vid.GetPath())
+		if err == nil || i > 10 {
+			break
+		}
+		i++
+		time.Sleep(2 * time.Second)
+		// Code to be executed after each iteration
+	}
 	if err != nil {
-		return title, description
+		fmt.Printf("Error probing default metadata %v %v %v\n", data, err, i)
+		return title, description, duration, err
 	}
 	unstructuredData := make(map[string]interface{})
 	json.Unmarshal([]byte(data), &unstructuredData)
+	fmt.Printf("Meta Data Unstructured %v %v\n", unstructuredData, unstructuredData["format"])
 	if _, ok := unstructuredData["format"]; ok {
 		if _, ok2 := unstructuredData["format"].(map[string]interface{})["tags"]; ok2 {
 			if _, ok3 := unstructuredData["format"].(map[string]interface{})["tags"].(map[string]interface{})["description"]; ok3 {
@@ -377,8 +638,18 @@ func ProbeDefaultMetadata(vid *vpb.Video) (string, string) {
 				}
 			}
 		}
+		if _, ok7 := unstructuredData["format"].(map[string]interface{})["duration"]; ok7 {
+			if _, ok8 := unstructuredData["format"].(map[string]interface{})["duration"].(string); ok8 {
+				resolvedInt, err2 := strconv.Atoi(strings.Split(unstructuredData["format"].(map[string]interface{})["duration"].(string), ".")[0])
+				if err2 == nil {
+					duration = strconv.Itoa(resolvedInt)
+				} else {
+					fmt.Printf("Error resolving duration of Video %v", err2)
+				}
+			}
+		}
 	}
-	return title, description
+	return title, description, duration, nil
 }
 
 func FindDefaultThumbnail(thumbtrack []structs.Thumbnail, media []structs.MediaItem) []structs.MediaItem {
@@ -504,7 +775,7 @@ func GenerateThumbnailTrack(vid *vpb.Video, thumbtrack []structs.Thumbnail) ([]s
 			"f":   "image2",
 			"q:v": "6", // Quality of image. 6 is reasonable, thumbtrack total comes to half a mb for a 30 minute episode of Atlanta "The Jacket" with mod(n,300)
 		}).
-		ErrorToStdOut().
+		// ErrorToStdOut().
 		Run()
 	if err != nil {
 		fmt.Printf("Err Generating thumbnail track - GENERATE: %v\n", err)
@@ -616,18 +887,58 @@ func ScheduleProfanityCheck(vid *vpb.Video, media []structs.MediaItem) (structs.
 	if client == nil {
 		return structs.Video{}, errors.New("No client for database connection")
 	}
-	videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
-	record := &structs.Video{}
-	err = videos.FindOne(context.TODO(), bson.D{{"_id", vid.GetID()}}).Decode(&record) // Get from phone number data
-	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
-	var v structs.Video
-	videos.FindOneAndUpdate(
-		context.TODO(),
-		bson.D{{"_id", vid.GetID()}},
-		bson.M{"$set": bson.M{"status": "check:" + jobId}},
-		opts).
-		Decode(&v)
-	return *record, nil
+	mut := `
+		mutation FindOneAndUpdateVideo($field: String!, $value: String!, $fieldActionMatch: String!, $newValue: String!) {
+			findOneAndUpdateVideo(field: $field, value: $value, fieldActionMatch: $fieldActionMatch, newValue: $newValue) {
+				id
+				author
+				status
+				publish
+				creation
+				mpd
+				hls
+				media
+				thumbnail
+				thumbtrack
+				title
+				description
+				tags
+				production
+				cast
+				directors
+				writers
+				timeline
+				duration
+			}
+		}
+	`
+
+	payload2 := map[string]interface{}{
+		"query": mut,
+		"variables": map[string]string{
+			"field":            "id",
+			"value":            vid.GetID(),
+			"fieldActionMatch": "status",
+			"newValue":         "check:" + jobId,
+		},
+	}
+
+	// findone and update
+	recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideo")
+	var record structs.Video
+	if err != nil {
+		return record, err // record creation failed, dont attampt running
+	}
+	data, err := json.Marshal(recordRaw)
+	if err != nil {
+		return record, err
+	}
+	err = json.Unmarshal(data, &record)
+	if err != nil {
+		fmt.Println(err)
+		return record, err
+	}
+	return record, nil
 }
 
 func DeleteFolder(dir string) error {
@@ -727,7 +1038,7 @@ func FindClosedCaptions(vid *vpb.Video, media []structs.MediaItem) []structs.Med
 			Output(out, ffmpeg.KwArgs{
 				"map": "0:s:" + strconv.Itoa(i),
 			}).
-			ErrorToStdOut().
+			// ErrorToStdOut().
 			Run()
 		if err == nil {
 			media = append(media, structs.MediaItem{
@@ -743,7 +1054,7 @@ func FindDuration(vid *vpb.Video) int {
 	fmt.Printf("Find and record duration")
 	data, err := ffmpeg.Probe(vid.GetPath())
 	if err != nil {
-		fmt.Printf("Issue with probing video for audio data")
+		fmt.Printf("Issue with probing video for audio data %v", err)
 	}
 	unstructuredData := make(map[string]interface{})
 	json.Unmarshal([]byte(data), &unstructuredData)
@@ -761,4 +1072,61 @@ func FindDuration(vid *vpb.Video) int {
 		}
 	}
 	return 0
+}
+
+func FindOneAndUpdateVideoField(vid structs.Video, field string, value string) (structs.Video, error) {
+	mut := `
+			mutation FindOneAndUpdateVideo($field: String!, $value: String!, $fieldActionMatch: String!, $newValue: String!) {
+				findOneAndUpdateVideo(field: $field, value: $value, fieldActionMatch: $fieldActionMatch, newValue: $newValue) {
+					id
+					author
+					status
+					publish
+					creation
+					mpd
+					hls
+					media
+					thumbnail
+					thumbtrack
+					title
+					description
+					tags
+					production
+					cast
+					directors
+					writers
+					timeline
+					duration
+				}
+			}
+		`
+
+	payload2 := map[string]interface{}{
+		"query": mut,
+		"variables": map[string]string{
+			"field":            "id",
+			"value":            vid.ID,
+			"fieldActionMatch": field,
+			"newValue":         value,
+		},
+	}
+
+	// findone and update
+	recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideo")
+	var record structs.Video
+	if err != nil {
+		fmt.Printf("Error %v\n", err)
+		return structs.Video{}, err // record creation failed, dont attampt running
+	}
+	data2, err := json.Marshal(recordRaw)
+	if err != nil {
+		fmt.Printf("Error %v\n", err)
+		return structs.Video{}, err
+	}
+	err = json.Unmarshal(data2, &record)
+	if err != nil {
+		fmt.Printf("Error %v\n", err)
+		return structs.Video{}, err
+	}
+	return record, nil
 }

@@ -349,12 +349,12 @@ type AdTagUri struct {
 	Url          string   `xml:",innerxml"`
 }
 
-func GetVideoDuration(document string) (int, error) {
+func GetVideoDuration(document string) (string, error) {
 	videos := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("videos")
 	record := &structs.Video{}
 	err := videos.FindOne(context.TODO(), bson.D{{"_id", document}}).Decode(&record) // Get from video data
 	if err != nil {
-		return 0, fmt.Errorf("Get Video Duration failed")
+		return "0", fmt.Errorf("Get Video Duration failed")
 	}
 	return record.Duration, nil
 }
@@ -688,9 +688,10 @@ func GenerateAndServeVast(r *http.Request) ([]byte, error) {
 	return []byte(x), nil
 }
 
-func GenerateMockTimeline(duration int) []interface{} {
+func GenerateMockTimeline(duration string) []interface{} {
 	minutes := 5
-	requiredRolls := (duration / 60) / minutes
+	durationInt, _ := strconv.Atoi(duration)
+	requiredRolls := (durationInt / 60) / minutes
 	curTime := 300 // 5 minutes start time, dont start at pre roll
 	timeline := make([]interface{}, requiredRolls)
 	for i := 0; i < requiredRolls; i++ {

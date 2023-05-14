@@ -24,6 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 type SmsManagementClient interface {
 	CreateNewSmsBlast(ctx context.Context, in *NewMsg, opts ...grpc.CallOption) (*Msg, error)
 	ReturnSmsJobResult(ctx context.Context, in *Msg, opts ...grpc.CallOption) (*Msg, error)
+	GetGraphqlValidMasterLogin(ctx context.Context, in *Msg, opts ...grpc.CallOption) (*Msg, error)
 }
 
 type smsManagementClient struct {
@@ -52,12 +53,22 @@ func (c *smsManagementClient) ReturnSmsJobResult(ctx context.Context, in *Msg, o
 	return out, nil
 }
 
+func (c *smsManagementClient) GetGraphqlValidMasterLogin(ctx context.Context, in *Msg, opts ...grpc.CallOption) (*Msg, error) {
+	out := new(Msg)
+	err := c.cc.Invoke(ctx, "/sms.smsManagement/GetGraphqlValidMasterLogin", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SmsManagementServer is the server API for SmsManagement service.
 // All implementations must embed UnimplementedSmsManagementServer
 // for forward compatibility
 type SmsManagementServer interface {
 	CreateNewSmsBlast(context.Context, *NewMsg) (*Msg, error)
 	ReturnSmsJobResult(context.Context, *Msg) (*Msg, error)
+	GetGraphqlValidMasterLogin(context.Context, *Msg) (*Msg, error)
 	mustEmbedUnimplementedSmsManagementServer()
 }
 
@@ -70,6 +81,9 @@ func (UnimplementedSmsManagementServer) CreateNewSmsBlast(context.Context, *NewM
 }
 func (UnimplementedSmsManagementServer) ReturnSmsJobResult(context.Context, *Msg) (*Msg, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReturnSmsJobResult not implemented")
+}
+func (UnimplementedSmsManagementServer) GetGraphqlValidMasterLogin(context.Context, *Msg) (*Msg, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGraphqlValidMasterLogin not implemented")
 }
 func (UnimplementedSmsManagementServer) mustEmbedUnimplementedSmsManagementServer() {}
 
@@ -120,6 +134,24 @@ func _SmsManagement_ReturnSmsJobResult_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SmsManagement_GetGraphqlValidMasterLogin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Msg)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SmsManagementServer).GetGraphqlValidMasterLogin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sms.smsManagement/GetGraphqlValidMasterLogin",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SmsManagementServer).GetGraphqlValidMasterLogin(ctx, req.(*Msg))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SmsManagement_ServiceDesc is the grpc.ServiceDesc for SmsManagement service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -134,6 +166,10 @@ var SmsManagement_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "returnSmsJobResult",
 			Handler:    _SmsManagement_ReturnSmsJobResult_Handler,
+		},
+		{
+			MethodName: "GetGraphqlValidMasterLogin",
+			Handler:    _SmsManagement_GetGraphqlValidMasterLogin_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

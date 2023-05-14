@@ -31,6 +31,7 @@ import (
 	vpb "tycoon.systems/tycoon-services/video"
 
 	"net/http"
+	"os"
 )
 
 const (
@@ -122,7 +123,7 @@ func (v *VideoManegmentServer) CreateNewVideoUpload(ctx context.Context, in *vpb
 			var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash()) // Access mongo and check user identifier against hash to determine if request should be honoured
 			if authenticated != false {
 				vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: "null", Filename: "null", Path: in.GetPath()}
-				transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "waiting", []structs.Thumbnail{}, true) // Build initial record for tracking during processing
+				_, _ = transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "waiting", []structs.Thumbnail{}, true) // Build initial record for tracking during processing
 				jobProvisioned := video_queue.ProvisionVideoJob(&vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: in.GetDestination(), Filename: in.GetFilename(), Path: in.GetPath()})
 				if jobProvisioned != "failed" {
 					return vid, nil
@@ -179,6 +180,20 @@ func main() {
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
 	}
+}
+
+func logOutput() {
+	logFilePath := "logs.txt" // Path to the log file
+
+	// Open the log file in append mode, creating it if it doesn't exist
+	logFile, err := os.OpenFile(logFilePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatal("Error opening log file:", err)
+	}
+	defer logFile.Close()
+
+	// Set the log output to the log file
+	log.SetOutput(logFile)
 }
 
 func serveAdCompliantServer() *http.Server {

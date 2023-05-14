@@ -10,6 +10,8 @@ Methods that must be consumed by Go must start with uppercase. */
 service smsManagement {
     rpc CreateNewSmsBlast (NewMsg) returns (Msg) {}
     rpc returnSmsJobResult (Msg) returns (Msg) {}
+    rpc GetGraphqlValidMasterLogin(Msg) returns (Msg) {}
+
 }
 
 message NewMsg {

@@ -6,6 +6,10 @@ replace tycoon.systems/tycoon-services/s3credentials => ../../../api/
 
 replace tycoon.systems/tycoon-services/structs => ../../../structs/
 
+replace tycoon.systems/tycoon-services/security => ../../../security
+
+replace tycoon.systems/tycoon-services/sms => ../../../sms
+
 replace tycoon.systems/tycoon-services/video => ../../
 
 require (

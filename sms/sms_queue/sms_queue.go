@@ -7,10 +7,10 @@ import (
 	"reflect"
 
 	"github.com/hibiken/asynq"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"tycoon.systems/tycoon-services/s3credentials"
+	"tycoon.systems/tycoon-services/security"
 	"tycoon.systems/tycoon-services/structs"
 
 	// "strings"
@@ -18,18 +18,19 @@ import (
 
 	"github.com/twilio/twilio-go"
 	openapi "github.com/twilio/twilio-go/rest/api/v2010"
+	messagingapi "github.com/twilio/twilio-go/rest/messaging/v1"
 
-	// notifyapi "github.com/twilio/twilio-go/rest/notify/v1"
 	"time"
 
 	"github.com/go-redis/redis/v8"
-	messagingapi "github.com/twilio/twilio-go/rest/messaging/v1"
 	"tycoon.systems/tycoon-services/sms/sms_utility"
 
 	"os"
 
 	"google.golang.org/grpc"
 	pb "tycoon.systems/tycoon-services/sms"
+
+	"net/http"
 )
 
 var (
@@ -49,8 +50,16 @@ var (
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
+	tycoonSystemsQueuePort = redis.NewClient(&redis.Options{
+		Addr:     s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_queue_port", ""),
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 	returnJobResultPort = s3credentials.GetS3Data("app", "services", "smsServer")
 	returnJobResultAddr = s3credentials.GetS3Data("app", "prodhost", "")
+
+	graphqlClient   = &http.Client{}
+	graphqlEndpoint = s3credentials.GetS3Data("graphql", "endpoint", "")
 )
 
 const (
@@ -108,15 +117,45 @@ func HandleSmsDeliveryTask(ctx context.Context, t *asynq.Task) error {
 }
 
 func PerformSmsDelivery(msg structs.Msg) error {
-	if client == nil {
-		return fmt.Errorf("Database client connection unavailable %v", err)
+	query := `
+		query FindOneNumber($field: String!, $value: String!) {
+			findOneNumber(field: $field, value: $value) {
+				id
+				number
+				userId
+				smsUrl
+				voiceUrl
+				status
+				sid
+				subs
+				chats
+			}
+		}
+	`
+	// Prepare the GraphQL request payload
+	payload := map[string]interface{}{
+		"query": query,
+		"variables": map[string]string{
+			"field": "number",
+			"value": msg.From,
+		},
 	}
-	coll := client.Database(s3credentials.GetS3Data("mongo", "db", "")).Collection("numbers")
-	record := &structs.Number{}
-	err := coll.FindOne(context.TODO(), bson.D{{"number", msg.From}}).Decode(&record) // Get from phone number data
+
+	recordRaw, err := security.RunGraphqlQuery(payload, "POST", graphqlEndpoint, "", "findOneNumber")
+	fmt.Printf("Record Raw %v\n", recordRaw)
+	record := structs.Number{}
+	data, err := json.Marshal(recordRaw)
 	if err != nil {
-		return fmt.Errorf("failure %v", err)
+		return fmt.Errorf("error %v", err)
 	}
+	err = json.Unmarshal(data, &record)
+	if err != nil {
+		fmt.Println(err)
+		return fmt.Errorf("error %v", err)
+	}
+
+	fmt.Printf("Record %v %v", record, record.Sid)
+
 	twilioClient := twilio.NewRestClientWithParams(twilio.ClientParams{
 		Username: s3credentials.GetS3Data("twilioMpst", "sid", ""),
 		Password: s3credentials.GetS3Data("twilioMpst", "authToken", ""),
@@ -140,8 +179,8 @@ func PerformSmsDelivery(msg structs.Msg) error {
 	case reflect.Slice:
 		s := reflect.ValueOf(record.Subs)
 		for i := 0; i < s.Len(); i++ {
-			if reflect.TypeOf(record.Subs[i]) == reflect.TypeOf(structs.FromObj{}) { // Records must be in structs.FromObj format
-				var to string = record.Subs[i].From
+			if reflect.TypeOf(record.Subs[i]).Kind() == reflect.String { // Records must be in structs.FromObj format
+				var to string = record.Subs[i].(string)
 				params := &openapi.CreateMessageParams{
 					To:   &to,
 					From: &msg.From,

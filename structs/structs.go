@@ -35,7 +35,7 @@ type Number struct {
 	VoiceUrl string
 	Status   string
 	Sid      string
-	Subs     []FromObj
+	Subs     []interface{}
 	Chats    []interface{}
 }
 
@@ -57,8 +57,8 @@ type Video struct {
 	ID          string `bson:"_id" json:"id,omitempty"`
 	Author      string
 	Status      string
-	Publish     int
-	Creation    int
+	Publish     string
+	Creation    string
 	Mpd         string
 	Hls         string
 	Media       []MediaItem
@@ -72,7 +72,7 @@ type Video struct {
 	Directors   []interface{}
 	Writers     []interface{}
 	Timeline    []interface{}
-	Duration    int
+	Duration    string
 }
 
 type MediaItem struct {
