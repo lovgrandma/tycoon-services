@@ -4,3 +4,5 @@ tycoon-services
 deploy
 api/s3credentialsdata.go
 tycoon-services.exe
+./tycoon-services-dev
+build
