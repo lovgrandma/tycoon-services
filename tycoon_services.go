@@ -62,6 +62,14 @@ type AdManagementServer struct {
 	adpb.UnimplementedAdManagementServer
 }
 
+func CheckRequestAuth(domainKey string) string {
+	auth := s3credentials.GetS3Data("business", "keys", domainKey)
+	if auth != "" {
+		return auth
+	}
+	return ""
+}
+
 func (a *AdManagementServer) CreateNewVastCompliantAdVideoJob(ctx context.Context, in *adpb.NewVast) (*adpb.Vast, error) {
 	if reflect.TypeOf(in.GetIdentifier()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetDocumentId()).Kind() == reflect.String &&
@@ -74,11 +82,14 @@ func (a *AdManagementServer) CreateNewVastCompliantAdVideoJob(ctx context.Contex
 		reflect.TypeOf(in.GetClickthroughUrl()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetCallToAction()).Kind() == reflect.String {
 		if len(in.GetIdentifier()) > 0 && len(in.GetUsername()) > 0 && len(in.GetSocket()) > 0 && len(in.GetUuid()) > 0 && len(in.GetHash()) > 0 && len(in.GetTrackingUrl()) > 0 && len(in.GetAdTitle()) > 0 && len(in.GetClickthroughUrl()) > 0 && len(in.GetStartTime()) > 0 && len(in.GetEndTime()) > 0 && len(in.GetPlayTime()) > 0 {
-			var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash()) // Access mongo and check user identifier against hash to determine if request should be honoured
-			if authenticated != false {
-				jobProvisioned := ad_queue.ProvisionCreateNewVastCompliantAdVideoJob(structs.VastTag{ID: in.GetUuid(), Socket: in.GetIdentifier(), Status: "Pending", Url: "", DocumentId: in.GetDocumentId(), TrackingUrl: in.GetTrackingUrl(), AdTitle: in.GetAdTitle(), ClickthroughUrl: in.GetClickthroughUrl(), CallToAction: in.GetCallToAction(), StartTime: in.GetStartTime(), EndTime: in.GetEndTime(), PlayTime: in.GetPlayTime()})
-				if jobProvisioned != "failed" {
-					return &adpb.Vast{Status: "Good", ID: in.GetUuid(), Socket: in.GetIdentifier()}, nil
+			reqAuth := CheckRequestAuth(in.GetDomainKey())
+			if reqAuth != "" {
+				var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash(), reqAuth) // Access mongo and check user identifier against hash to determine if request should be honoured
+				if authenticated != false {
+					jobProvisioned := ad_queue.ProvisionCreateNewVastCompliantAdVideoJob(structs.VastTag{ID: in.GetUuid(), Socket: in.GetIdentifier(), Status: "Pending", Url: "", DocumentId: in.GetDocumentId(), TrackingUrl: in.GetTrackingUrl(), AdTitle: in.GetAdTitle(), ClickthroughUrl: in.GetClickthroughUrl(), CallToAction: in.GetCallToAction(), StartTime: in.GetStartTime(), EndTime: in.GetEndTime(), PlayTime: in.GetPlayTime(), Domain: reqAuth})
+					if jobProvisioned != "failed" {
+						return &adpb.Vast{Status: "Good", ID: in.GetUuid(), Socket: in.GetIdentifier()}, nil
+					}
 				}
 			}
 		}
@@ -95,12 +106,15 @@ func (s *SmsManagementServer) CreateNewSmsBlast(ctx context.Context, in *pb.NewM
 		reflect.TypeOf(in.GetIdentifier()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetHash()).Kind() == reflect.String {
 		if len(in.GetContent()) > 0 && len(in.GetFrom()) > 0 && len(in.GetUsername()) > 0 && len(in.GetIdentifier()) > 0 && len(in.GetHash()) > 0 {
-			// log.Printf("Received Sms: %v, %v, %v, %v, %v", in.GetContent(), in.GetFrom(), in.GetUsername(), in.GetIdentifier(), in.GetHash())
-			var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash()) // Access mongo and check user identifier against hash to determine if request should be honoured
-			if authenticated != false {
-				jobProvisioned := sms_queue.ProvisionSmsJob(structs.Msg{Content: in.GetContent(), From: in.GetFrom()})
-				if jobProvisioned != "failed" {
-					return &pb.Msg{Content: in.GetContent(), From: in.GetFrom(), JobId: jobProvisioned}, nil
+			log.Printf("Received Sms: %v, %v, %v, %v, %v", in.GetContent(), in.GetFrom(), in.GetUsername(), in.GetIdentifier(), in.GetHash())
+			reqAuth := CheckRequestAuth(in.GetDomainKey())
+			if reqAuth != "" {
+				var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash(), reqAuth) // Access mongo and check user identifier against hash to determine if request should be honoured
+				if authenticated != false {
+					jobProvisioned := sms_queue.ProvisionSmsJob(structs.Msg{Content: in.GetContent(), From: in.GetFrom()})
+					if jobProvisioned != "failed" {
+						return &pb.Msg{Content: in.GetContent(), From: in.GetFrom(), JobId: jobProvisioned, Domain: reqAuth}, nil
+					}
 				}
 			}
 		}
@@ -120,13 +134,16 @@ func (v *VideoManegmentServer) CreateNewVideoUpload(ctx context.Context, in *vpb
 		reflect.TypeOf(in.GetHash()).Kind() == reflect.String {
 		if len(in.GetIdentifier()) > 0 && len(in.GetUsername()) > 0 && len(in.GetSocket()) > 0 && len(in.GetDestination()) > 0 && len(in.GetFilename()) > 0 && len(in.GetPath()) > 0 && len(in.GetUuid()) > 0 && len(in.GetHash()) > 0 {
 			// log.Printf("Received Video: %v, %v, %v, %v, %v, %v, %v, %v", in.GetIdentifier(), in.GetUsername(), in.GetSocket(), in.GetDestination(), in.GetFilename(), in.GetPath(), in.GetUuid(), in.GetHash())
-			var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash()) // Access mongo and check user identifier against hash to determine if request should be honoured
-			if authenticated != false {
-				vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: "null", Filename: "null", Path: in.GetPath()}
-				_, _ = transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "waiting", []structs.Thumbnail{}, true) // Build initial record for tracking during processing
-				jobProvisioned := video_queue.ProvisionVideoJob(&vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: in.GetDestination(), Filename: in.GetFilename(), Path: in.GetPath()})
-				if jobProvisioned != "failed" {
-					return vid, nil
+			reqAuth := CheckRequestAuth(in.GetDomainKey())
+			if reqAuth != "" {
+				var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash(), reqAuth) // Access mongo and check user identifier against hash to determine if request should be honoured
+				if authenticated != false {
+					vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: "null", Filename: "null", Path: in.GetPath()}
+					_, _ = transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "waiting", []structs.Thumbnail{}, true) // Build initial record for tracking during processing
+					jobProvisioned := video_queue.ProvisionVideoJob(&vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: in.GetDestination(), Filename: in.GetFilename(), Path: in.GetPath(), Domain: reqAuth})
+					if jobProvisioned != "failed" {
+						return vid, nil
+					}
 				}
 			}
 		}

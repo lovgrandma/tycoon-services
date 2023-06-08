@@ -13,30 +13,32 @@ service adManagement {
 }
 
 message NewVast {
-    string      Identifier = 1;
-    string      DocumentId = 2;
-    string      Username = 3;
-    string      Socket = 4;
-    string      Destination = 5;
-    string      Filename = 6;
-    string      Path = 7;
-    string      Uuid = 8;
-    string      Hash = 9;
-    string      TrackingUrl = 10;
-    string      AdTitle = 11;
-    string      ClickthroughUrl = 12;
-    string      CallToAction = 13;
-    string      StartTime = 14;
-    string      EndTime = 15;
-    string      PlayTime = 16;
+    string      DomainKey = 1;
+    string      Identifier = 2;
+    string      DocumentId = 3;
+    string      Username = 4;
+    string      Socket = 5;
+    string      Destination = 6;
+    string      Filename = 7;
+    string      Path = 8;
+    string      Uuid = 9;
+    string      Hash = 10;
+    string      TrackingUrl = 11;
+    string      AdTitle = 12;
+    string      ClickthroughUrl = 13;
+    string      CallToAction = 14;
+    string      StartTime = 15;
+    string      EndTime = 16;
+    string      PlayTime = 17;
 }
 
 message Vast {
     string      ID = 1;
-    string      DocumentId = 2;
-    string      Status = 3;
-    string      Socket = 4;
-    string      Destination = 5;
-    string      Filename = 6;
-    string      Path = 7;
+    string      Domain = 2;
+    string      DocumentId = 3;
+    string      Status = 4;
+    string      Socket = 5;
+    string      Destination = 6;
+    string      Filename = 7;
+    string      Path = 8;
 }

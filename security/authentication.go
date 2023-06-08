@@ -55,12 +55,12 @@ func GetGraphqlAuth() string {
 	return ""
 }
 
-func CheckAuthenticRequest(username string, identifier string, hash string) bool {
+func CheckAuthenticRequest(username string, identifier string, hash string, domain string) bool {
 	graphqlAuth := GetGraphqlAuth()
 	if graphqlAuth != "" {
 		query := `
-			query FindOneUserp($field: String!, $value: String!) {
-				findOneUserp(field: $field, value: $value) {
+			query FindOneUserp($schemaname: String!, $field: String!, $value: String!) {
+				findOneUserp(schemaname: $schemaname, field: $field, value: $value) {
 					id
 					username
 					datecreated
@@ -79,8 +79,9 @@ func CheckAuthenticRequest(username string, identifier string, hash string) bool
 		payload := map[string]interface{}{
 			"query": query,
 			"variables": map[string]string{
-				"field": "id",
-				"value": identifier,
+				"schemaname": domain,
+				"field":      "id",
+				"value":      identifier,
 			},
 		}
 

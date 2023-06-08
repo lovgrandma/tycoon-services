@@ -15,15 +15,17 @@ service smsManagement {
 }
 
 message NewMsg {
-    string      From = 1;
-    string      Content = 2;
-    string      Username = 3;
-    string      Identifier = 4;
-    string      Hash = 5;
+    string      DomainKey = 1;
+    string      From = 2;
+    string      Content = 3;
+    string      Username = 4;
+    string      Identifier = 5;
+    string      Hash = 6;
 }
 
 message Msg {
     string      From = 1;
-    string      Content = 2;
-    string      JobId = 3;
+    string      Domain = 2;
+    string      Content = 3;
+    string      JobId = 4;
 }

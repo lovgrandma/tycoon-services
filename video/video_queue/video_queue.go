@@ -110,6 +110,7 @@ func PerformVideoProcess(vid *vpb.Video) error {
 			Title:       defaultTitle,
 			Description: defaultDescription,
 			Duration:    defaultDuration,
+			Domain:      vid.GetDomain(),
 		}
 		transcode.FindOneAndUpdateVideoField(vidDefaults, "duration", vidDefaults.Duration)
 		transcode.FindOneAndUpdateVideoField(vidDefaults, "title", vidDefaults.Title)

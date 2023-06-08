@@ -228,8 +228,8 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 		return false
 	}
 	query := `
-		query FindOneVideo($field: String!, $value: String!) {
-			findOneVideo(field: $field, value: $value) {
+		query FindOneVideo($schemaname: String!, $field: String!, $value: String!) {
+			findOneVideo(schemaname: $schemaname, field: $field, value: $value) {
 				id
 				author
 				status
@@ -256,8 +256,9 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 	payload := map[string]interface{}{
 		"query": query,
 		"variables": map[string]string{
-			"field": "id",
-			"value": vid.GetID(),
+			"schamaname": vid.GetDomain(),
+			"field":      "id",
+			"value":      vid.GetID(),
 		},
 	}
 
@@ -266,8 +267,8 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 	if err != nil || recordRaw == nil || len(recordRaw) == 0 { // If no matching documents create new
 		defaultTitle, defaultDescription, duration, _ := ProbeDefaultMetadata(vid)
 		mut := `
-			mutation SetVideo($author: String, $status: String, $publish: String, $creation: String, $mpd: String, $hls: String, $thumbnail: String, $media: [JSON], $thumbtrack: [JSON], $title: String, $description: String, $tags: [String], $cast: [String], $production: String, $directors: [String], $writers: [String], $timeline: [JSON], $duration: String) {
-				setVideo(author: $author, status: $status, publish: $publish, creation: $creation, mpd: $mpd, hls: $hls, thumbnail: $thumbnail, media: $media, thumbtrack: $thumbtrack, title: $title, description: $description, tags: $tags, cast: $cast, production: $production, directors: $directors, writers: $writers, timeline: $timeline, duration: $duration) {
+			mutation SetVideo($schemaname: String!, $author: String, $status: String, $publish: String, $creation: String, $mpd: String, $media: [JSON], $description: String, $duration: String, $timeline: [JSON], $writers: [String], $directors: [String], $production: String, $tags: [String], $cast: [String], $title: String, $thumbtrack: [JSON], $thumbnail: String, $hls: String) {
+				setVideo(schemaname: $schemaname, author: $author, status: $status, publish: $publish, creation: $creation, mpd: $mpd, media: $media, description: $description, duration: $duration, timeline: $timeline, writers: $writers, directors: $directors, production: $production, tags: $tags, cast: $cast, title: $title, thumbtrack: $thumbtrack, thumbnail: $thumbnail, hls: $hls) {
 					id
 					author
 					status
@@ -293,6 +294,7 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 		payload2 := map[string]interface{}{
 			"query": mut,
 			"variables": map[string]interface{}{
+				"schamaname":  vid.GetDomain(),
 				"id":          vid.GetID(),
 				"author":      vid.GetSocket(),
 				"status":      status,
@@ -336,8 +338,8 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 		}
 
 		mut := `
-			mutation FindOneAndUpdateVideo($field: String!, $value: String!, $fieldActionMatch: String!, $newValue: String!) {
-				findOneAndUpdateVideo(field: $field, value: $value, fieldActionMatch: $fieldActionMatch, newValue: $newValue) {
+			mutation FindOneAndUpdateVideo($schemaname: String!, $field: String!, $value: String!, $fieldActionMatch: String!, $newValue: String!) {
+				findOneAndUpdateVideo(schemaname: $schemaname, field: $field, value: $value, fieldActionMatch: $fieldActionMatch, newValue: $newValue) {
 					id
 					author
 					status
@@ -364,6 +366,7 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 		payload2 := map[string]interface{}{
 			"query": mut,
 			"variables": map[string]string{
+				"schamaname":       vid.GetDomain(),
 				"field":            "id",
 				"value":            vid.GetID(),
 				"fieldActionMatch": "status",
@@ -387,8 +390,8 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 	}
 
 	query := `
-		query FindOneVideo($field: String!, $value: String!) {
-			findOneVideo(field: $field, value: $value) {
+		query FindOneVideo($schemaname: String!, $field: String!, $value: String!) {
+			findOneVideo(schemaname: $schemaname, field: $field, value: $value) {
 				id
 				author
 				status
@@ -415,8 +418,9 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 	payload := map[string]interface{}{
 		"query": query,
 		"variables": map[string]string{
-			"field": "id",
-			"value": vid.GetID(),
+			"schemaname": vid.GetDomain(),
+			"field":      "id",
+			"value":      vid.GetID(),
 		},
 	}
 
@@ -427,8 +431,8 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 		defaultTitle, defaultDescription, duration, _ := ProbeDefaultMetadata(vid)
 
 		mut := `
-			mutation SetVideo($author: String, $status: String, $publish: String, $creation: String, $mpd: String, $hls: String, $thumbnail: String, $media: [JSON], $thumbtrack: [JSON], $title: String, $description: String, $tags: [String], $cast: [String], $production: String, $directors: [String], $writers: [String], $timeline: [JSON], $duration: String) {
-				setVideo(author: $author, status: $status, publish: $publish, creation: $creation, mpd: $mpd, hls: $hls, thumbnail: $thumbnail, media: $media, thumbtrack: $thumbtrack, title: $title, description: $description, tags: $tags, cast: $cast, production: $production, directors: $directors, writers: $writers, timeline: $timeline, duration: $duration) {
+			mutation SetVideo($schemaname: String!, $author: String, $status: String, $publish: String, $creation: String, $mpd: String, $media: [JSON], $description: String, $duration: String, $timeline: [JSON], $writers: [String], $directors: [String], $production: String, $tags: [String], $cast: [String], $title: String, $thumbtrack: [JSON], $thumbnail: String, $hls: String) {
+				setVideo(schemaname: $schemaname, author: $author, status: $status, publish: $publish, creation: $creation, mpd: $mpd, media: $media, description: $description, duration: $duration, timeline: $timeline, writers: $writers, directors: $directors, production: $production, tags: $tags, cast: $cast, title: $title, thumbtrack: $thumbtrack, thumbnail: $thumbnail, hls: $hls) {
 					id
 					author
 					status
@@ -455,6 +459,7 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 		payload2 := map[string]interface{}{
 			"query": mut,
 			"variables": map[string]interface{}{
+				"schemaname":  vid.GetDomain(),
 				"author":      vid.GetSocket(),
 				"status":      status,
 				"publish":     "-1",
@@ -521,8 +526,8 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 		}
 
 		mut := `
-			mutation FindOneAndUpdateVideoObject($field: String, $value: String, $author: String, $publish: String, $creation: String, $mpd: String, $hls: String, $thumbnail: String, $thumbtrack: [JSON], $description: String, $production: String, $directors: [String], $writers: [String], $duration: String, $timeline: [JSON], $cast: [String], $title: String, $tags: [String], $media: [JSON], $status: String) {
-				findOneAndUpdateVideoObject(field: $field, value: $value, author: $author, publish: $publish, creation: $creation, mpd: $mpd, hls: $hls, thumbnail: $thumbnail, thumbtrack: $thumbtrack, description: $description, production: $production, directors: $directors, writers: $writers, duration: $duration, timeline: $timeline, cast: $cast, title: $title, tags: $tags, media: $media, status: $status) {
+			mutation FindOneAndUpdateVideoObject($schemaname: String!, $field: String, $value: String, $status: String, $duration: String, $timeline: [JSON], $writers: [String], $cast: [String], $production: String, $description: String, $thumbtrack: [JSON], $thumbnail: String, $hls: String, $mpd: String, $creation: String, $publish: String, $media: [JSON], $title: String, $tags: [String], $directors: [String], $author: String) {
+				findOneAndUpdateVideoObject(schemaname: $schemaname, field: $field, value: $value, status: $status, duration: $duration, timeline: $timeline, writers: $writers, cast: $cast, production: $production, description: $description, thumbtrack: $thumbtrack, thumbnail: $thumbnail, hls: $hls, mpd: $mpd, creation: $creation, publish: $publish, media: $media, title: $title, tags: $tags, directors: $directors, author: $author) {
 					id
 					author
 					status
@@ -558,6 +563,7 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 		payload2 := map[string]interface{}{
 			"query": mut,
 			"variables": map[string]interface{}{
+				"schemaname":  vid.GetDomain(),
 				"field":       "id",
 				"value":       vid.GetID(),
 				"author":      vid.GetSocket(),
@@ -888,8 +894,8 @@ func ScheduleProfanityCheck(vid *vpb.Video, media []structs.MediaItem) (structs.
 		return structs.Video{}, errors.New("No client for database connection")
 	}
 	mut := `
-		mutation FindOneAndUpdateVideo($field: String!, $value: String!, $fieldActionMatch: String!, $newValue: String!) {
-			findOneAndUpdateVideo(field: $field, value: $value, fieldActionMatch: $fieldActionMatch, newValue: $newValue) {
+		mutation FindOneAndUpdateVideo($schemaname: String!, $field: String!, $value: String!, $fieldActionMatch: String!, $newValue: String!) {
+			findOneAndUpdateVideo(schemaname: $schemaname, field: $field, value: $value, fieldActionMatch: $fieldActionMatch, newValue: $newValue) {
 				id
 				author
 				status
@@ -916,6 +922,7 @@ func ScheduleProfanityCheck(vid *vpb.Video, media []structs.MediaItem) (structs.
 	payload2 := map[string]interface{}{
 		"query": mut,
 		"variables": map[string]string{
+			"schemaname":       vid.GetDomain(),
 			"field":            "id",
 			"value":            vid.GetID(),
 			"fieldActionMatch": "status",

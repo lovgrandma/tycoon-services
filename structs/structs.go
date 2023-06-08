@@ -25,6 +25,7 @@ type Msg struct {
 	From    string
 	Content string
 	JobId   string
+	Domain  string
 }
 
 type Number struct {
@@ -73,6 +74,7 @@ type Video struct {
 	Writers     []interface{}
 	Timeline    []interface{}
 	Duration    string
+	Domain      string
 }
 
 type MediaItem struct {
@@ -111,6 +113,7 @@ type VastTag struct {
 	StartTime       string
 	EndTime         string
 	PlayTime        string
+	Domain          string
 }
 
 type AdUnit struct {
@@ -134,6 +137,7 @@ type AdUnit struct {
 	Media             []string
 	Duration          Duration
 	History           []AdHistoryItem
+	Domain            string
 }
 
 type Duration struct {

@@ -13,21 +13,23 @@ service videoManagement {
 }
 
 message NewVideo {
-    string      Identifier = 1;
-    string      Username = 2;
-    string      Socket = 3;
-    string      Destination = 4;
-    string      Filename = 5;
-    string      Path = 6;
-    string      Uuid = 7;
-    string      Hash = 8;
+    string      DomainKey = 1;
+    string      Identifier = 2;
+    string      Username = 3;
+    string      Socket = 4;
+    string      Destination = 5;
+    string      Filename = 6;
+    string      Path = 7;
+    string      Uuid = 8;
+    string      Hash = 9;
 }
 
 message Video {
     string      ID = 1;
-    string      Status = 2;
-    string      Socket = 3;
-    string      Destination = 4;
-    string      Filename = 5;
-    string      Path = 6;
+    string      Domain = 2;
+    string      Status = 3;
+    string      Socket = 4;
+    string      Destination = 5;
+    string      Filename = 6;
+    string      Path = 7;
 }
