@@ -1083,8 +1083,8 @@ func FindDuration(vid *vpb.Video) int {
 
 func FindOneAndUpdateVideoField(vid structs.Video, field string, value string) (structs.Video, error) {
 	mut := `
-			mutation FindOneAndUpdateVideo($field: String!, $value: String!, $fieldActionMatch: String!, $newValue: String!) {
-				findOneAndUpdateVideo(field: $field, value: $value, fieldActionMatch: $fieldActionMatch, newValue: $newValue) {
+		mutation FindOneAndUpdateVideo($schemaname: String!, $field: String!, $value: String!, $fieldActionMatch: String!, $newValue: String!) {
+			findOneAndUpdateVideo(schemaname: $schemaname, field: $field, value: $value, fieldActionMatch: $fieldActionMatch, newValue: $newValue) {
 					id
 					author
 					status
@@ -1111,6 +1111,7 @@ func FindOneAndUpdateVideoField(vid structs.Video, field string, value string) (
 	payload2 := map[string]interface{}{
 		"query": mut,
 		"variables": map[string]string{
+			"schemaname":       vid.Domain,
 			"field":            "id",
 			"value":            vid.ID,
 			"fieldActionMatch": field,
