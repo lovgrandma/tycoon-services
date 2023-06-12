@@ -141,7 +141,7 @@ func PerformSmsDelivery(msg structs.Msg) error {
 		},
 	}
 
-	recordRaw, err := security.RunGraphqlQuery(payload, "POST", graphqlEndpoint, "", "findOneNumber")
+	recordRaw, err := security.RunGraphqlQuery(payload, "POST", graphqlEndpoint, "", "findOneNumber", msg.Domain)
 	fmt.Printf("Record Raw %v\n", recordRaw)
 	record := structs.Number{}
 	data, err := json.Marshal(recordRaw)

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"log"
 
 	// "github.com/google/uuid"
@@ -32,6 +33,10 @@ import (
 
 	"net/http"
 	"os"
+	"regexp"
+
+	sLog "github.com/sirupsen/logrus"
+	"github.com/yutopp/go-rtmp"
 )
 
 const (
@@ -39,15 +44,16 @@ const (
 )
 
 var (
-	supportedAdOrigins = []structs.Origin{{"https://www.tycoon.systems"}, {"www.tycoon.systems"}, {"https://imasdk.googleapis.com"}, {"imasdk.googleapis.com"}, {"http://localhost:3000"}, {"localhost:3000"}, {"https://tycoon-systems-client.local:3000"}, {"tycoon-systems-client.local:3000"}, {"https://tycoon-systems-client.local"}, {"tycoon-systems-client.local"}}
-	devEnv             = s3credentials.GetS3Data("app", "dev", "")
-	sslPath            = s3credentials.GetS3Data("app", "sslPath", "")
-	servicesSslPath    = s3credentials.GetS3Data("app", "servicesSslPath", "")
-	goodServiceSsl     = s3credentials.GetS3Data("app", "goodServiceSsl", "")
-	port               = ":" + s3credentials.GetS3Data("app", "services", "smsClient")
-	videoPort          = ":" + s3credentials.GetS3Data("app", "services", "videoClient")
-	adPort             = ":" + s3credentials.GetS3Data("app", "services", "adClient")
-	adServerPort       = ":" + s3credentials.GetS3Data("app", "adServerPort", "")
+	supportedAdOrigins    = []structs.Origin{{"https://www.tycoon.systems"}, {"www.tycoon.systems"}, {"https://imasdk.googleapis.com"}, {"imasdk.googleapis.com"}, {"http://localhost:3000"}, {"localhost:3000"}, {"https://tycoon-systems-client.local:3000"}, {"tycoon-systems-client.local:3000"}, {"https://tycoon-systems-client.local"}, {"tycoon-systems-client.local"}}
+	devEnv                = s3credentials.GetS3Data("app", "dev", "")
+	sslPath               = s3credentials.GetS3Data("app", "sslPath", "")
+	servicesSslPath       = s3credentials.GetS3Data("app", "servicesSslPath", "")
+	goodServiceSsl        = s3credentials.GetS3Data("app", "goodServiceSsl", "")
+	port                  = ":" + s3credentials.GetS3Data("app", "services", "smsClient")
+	videoPort             = ":" + s3credentials.GetS3Data("app", "services", "videoClient")
+	adPort                = ":" + s3credentials.GetS3Data("app", "services", "adClient")
+	adServerPort          = ":" + s3credentials.GetS3Data("app", "adServerPort", "")
+	streamingServicesPort = ":" + s3credentials.GetS3Data("app", "streamingServicesPort", "")
 )
 
 type SmsManagementServer struct {
@@ -88,7 +94,7 @@ func (a *AdManagementServer) CreateNewVastCompliantAdVideoJob(ctx context.Contex
 				if authenticated != false {
 					jobProvisioned := ad_queue.ProvisionCreateNewVastCompliantAdVideoJob(structs.VastTag{ID: in.GetUuid(), Socket: in.GetIdentifier(), Status: "Pending", Url: "", DocumentId: in.GetDocumentId(), TrackingUrl: in.GetTrackingUrl(), AdTitle: in.GetAdTitle(), ClickthroughUrl: in.GetClickthroughUrl(), CallToAction: in.GetCallToAction(), StartTime: in.GetStartTime(), EndTime: in.GetEndTime(), PlayTime: in.GetPlayTime(), Domain: reqAuth})
 					if jobProvisioned != "failed" {
-						return &adpb.Vast{Status: "Good", ID: in.GetUuid(), Socket: in.GetIdentifier()}, nil
+						return &adpb.Vast{Status: "Good", ID: in.GetUuid(), Socket: in.GetIdentifier(), Domain: reqAuth}, nil
 					}
 				}
 			}
@@ -106,12 +112,13 @@ func (s *SmsManagementServer) CreateNewSmsBlast(ctx context.Context, in *pb.NewM
 		reflect.TypeOf(in.GetIdentifier()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetHash()).Kind() == reflect.String {
 		if len(in.GetContent()) > 0 && len(in.GetFrom()) > 0 && len(in.GetUsername()) > 0 && len(in.GetIdentifier()) > 0 && len(in.GetHash()) > 0 {
-			log.Printf("Received Sms: %v, %v, %v, %v, %v", in.GetContent(), in.GetFrom(), in.GetUsername(), in.GetIdentifier(), in.GetHash())
+			log.Printf("Received Sms: %v, %v, %v, %v, %v, %v", in.GetContent(), in.GetFrom(), in.GetUsername(), in.GetIdentifier(), in.GetHash(), in.GetDomainKey())
 			reqAuth := CheckRequestAuth(in.GetDomainKey())
 			if reqAuth != "" {
 				var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash(), reqAuth) // Access mongo and check user identifier against hash to determine if request should be honoured
+				log.Printf("Authenticated %v", authenticated)
 				if authenticated != false {
-					jobProvisioned := sms_queue.ProvisionSmsJob(structs.Msg{Content: in.GetContent(), From: in.GetFrom()})
+					jobProvisioned := sms_queue.ProvisionSmsJob(structs.Msg{Content: in.GetContent(), From: in.GetFrom(), Domain: reqAuth})
 					if jobProvisioned != "failed" {
 						return &pb.Msg{Content: in.GetContent(), From: in.GetFrom(), JobId: jobProvisioned, Domain: reqAuth}, nil
 					}
@@ -133,13 +140,14 @@ func (v *VideoManegmentServer) CreateNewVideoUpload(ctx context.Context, in *vpb
 		reflect.TypeOf(in.GetUuid()).Kind() == reflect.String &&
 		reflect.TypeOf(in.GetHash()).Kind() == reflect.String {
 		if len(in.GetIdentifier()) > 0 && len(in.GetUsername()) > 0 && len(in.GetSocket()) > 0 && len(in.GetDestination()) > 0 && len(in.GetFilename()) > 0 && len(in.GetPath()) > 0 && len(in.GetUuid()) > 0 && len(in.GetHash()) > 0 {
-			// log.Printf("Received Video: %v, %v, %v, %v, %v, %v, %v, %v", in.GetIdentifier(), in.GetUsername(), in.GetSocket(), in.GetDestination(), in.GetFilename(), in.GetPath(), in.GetUuid(), in.GetHash())
+			log.Printf("Received Video: %v, %v, %v, %v, %v, %v, %v, %v", in.GetIdentifier(), in.GetUsername(), in.GetSocket(), in.GetDestination(), in.GetFilename(), in.GetPath(), in.GetUuid(), in.GetHash())
 			reqAuth := CheckRequestAuth(in.GetDomainKey())
 			if reqAuth != "" {
 				var authenticated bool = security.CheckAuthenticRequest(in.GetUsername(), in.GetIdentifier(), in.GetHash(), reqAuth) // Access mongo and check user identifier against hash to determine if request should be honoured
 				if authenticated != false {
-					vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: "null", Filename: "null", Path: in.GetPath()}
+					vid := &vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: "null", Filename: "null", Path: in.GetPath(), Domain: reqAuth}
 					_, _ = transcode.UpdateMongoRecord(vid, []structs.MediaItem{}, "waiting", []structs.Thumbnail{}, true) // Build initial record for tracking during processing
+					log.Printf("\nReq Auth %v\n", reqAuth)
 					jobProvisioned := video_queue.ProvisionVideoJob(&vpb.Video{Status: "processing", ID: in.GetUuid(), Socket: in.GetSocket(), Destination: in.GetDestination(), Filename: in.GetFilename(), Path: in.GetPath(), Domain: reqAuth})
 					if jobProvisioned != "failed" {
 						return vid, nil
@@ -169,6 +177,10 @@ func loadTLSCredentials() (credentials.TransportCredentials, error) {
 }
 
 func main() {
+	err := os.Setenv("dev", devEnv)
+	if err != nil {
+		return
+	}
 	lis, err := net.Listen("tcp", serviceAddress+port) // Server for ingesting SMS and general requests
 	if err != nil {
 		log.Fatalf("Failed to listen on %v: %v", port, err)
@@ -192,6 +204,7 @@ func main() {
 	go video_workers.BuildWorkerServer() // Server for video job queue
 	go ad_workers.BuildWorkerServer()    // Server for ad job queue
 	go serveAdCompliantServer()
+	go serveStreamingServer()
 	go serverCronRoutines() // Initiate server cron routines
 	log.Printf("Server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
@@ -227,6 +240,40 @@ func serveAdCompliantServer() *http.Server {
 	return &http.Server{}
 }
 
+func serveStreamingServer() {
+	tcpAddr, err := net.ResolveTCPAddr("tcp", streamingServicesPort)
+	if err != nil {
+		log.Panicf("Failed: %+v", err)
+	}
+
+	listener, err := net.ListenTCP("tcp", tcpAddr)
+	if err != nil {
+		log.Panicf("Failed: %+v", err)
+	}
+
+	srv := rtmp.NewServer(&rtmp.ServerConfig{
+		OnConnect: func(conn net.Conn) (io.ReadWriteCloser, *rtmp.ConnConfig) {
+			l := sLog.StandardLogger()
+			//l.SetLevel(logrus.DebugLevel)
+
+			h := &Handler{}
+
+			return conn, &rtmp.ConnConfig{
+				Handler: h,
+
+				ControlState: rtmp.StreamControlStateConfig{
+					DefaultBandwidthWindowSize: 6 * 1024 * 1024 / 8,
+				},
+
+				Logger: l,
+			}
+		},
+	})
+	if err := srv.Serve(listener); err != nil {
+		log.Panicf("Failed: %+v", err)
+	}
+}
+
 func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWriter) {
 	origin := r.Header.Get("Origin")
 	log.Printf("Origin %v", origin)
@@ -237,6 +284,85 @@ func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWri
 		}
 	}
 	return false, w
+}
+
+func handleIngestLiveStream(w http.ResponseWriter, r *http.Request) {
+	log.Println("Received request at /stream/ingest")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		// Handle error
+		log.Println("Error reading request body:", err)
+		http.Error(w, "Error reading request body", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the request body
+	log.Println("Request body:", string(body))
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	streamKey := r.FormValue("key") // Assuming the stream key is passed as a form parameter named "key"
+
+	// Check if the stream key is valid or authorized
+	if isValidStreamKey(streamKey) {
+		// Start processing the incoming stream from OBS
+		// Handle the stream ingestion logic here
+
+		// Send a success response
+		w.WriteHeader(http.StatusOK)
+		log.Printf("Streaming Ingest Began %v", w)
+	} else {
+		// Send an error response for invalid or unauthorized stream key
+		http.Error(w, "Invalid or unauthorized stream key", http.StatusUnauthorized)
+	}
+}
+
+func GetDomainStreamKey(streamKey string) string {
+	domainRegex := `^([^-\s]+)`
+	reg := regexp.MustCompile(domainRegex) // Compile the regular expression pattern
+	matches := reg.FindStringSubmatch(streamKey)
+	if len(matches) > 1 {
+		return matches[1] // The first submatch (index 1) contains the desired word
+	}
+	return ""
+}
+
+func GetStreamIdStreamKey(streamKey string) string {
+	keyRegex := `-[a-zA-Z0-9-]+$`
+	// Compile the regular expression pattern
+	reg := regexp.MustCompile(keyRegex)
+
+	// Find the submatch
+	match := reg.FindString(streamKey)
+
+	if match != "" {
+		return match[1:] // Remove the leading hyphen ("-") from the match
+	}
+	return ""
+}
+
+// Verify if the stream key is valid and authorized
+func isValidStreamKey(streamKey string) bool {
+	// Find the submatches
+	var domain string = GetDomainStreamKey(streamKey)
+	var key string
+	if len(domain) > 1 {
+		key = GetStreamIdStreamKey(streamKey)
+	}
+	log.Printf("Domain %v key %v", domain, key)
+	keyValidated := security.FindUserpByFieldValue(domain, "key", key)
+	log.Printf("Validated %v", keyValidated)
+	if len(keyValidated) != 0 {
+		if reflect.TypeOf(keyValidated["key"]).Kind() == reflect.String {
+			if len(keyValidated["key"].(string)) > 0 && len(keyValidated["username"].(string)) > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func handleAdErrorRequests(w http.ResponseWriter, r *http.Request) {

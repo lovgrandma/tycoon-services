@@ -256,13 +256,13 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 	payload := map[string]interface{}{
 		"query": query,
 		"variables": map[string]string{
-			"schamaname": vid.GetDomain(),
+			"schemaname": vid.GetDomain(),
 			"field":      "id",
 			"value":      vid.GetID(),
 		},
 	}
 
-	recordRaw, err := security.RunGraphqlQuery(payload, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneVideo")
+	recordRaw, err := security.RunGraphqlQuery(payload, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneVideo", vid.GetDomain())
 	var record structs.Video
 	if err != nil || recordRaw == nil || len(recordRaw) == 0 { // If no matching documents create new
 		defaultTitle, defaultDescription, duration, _ := ProbeDefaultMetadata(vid)
@@ -294,7 +294,7 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 		payload2 := map[string]interface{}{
 			"query": mut,
 			"variables": map[string]interface{}{
-				"schamaname":  vid.GetDomain(),
+				"schemaname":  vid.GetDomain(),
 				"id":          vid.GetID(),
 				"author":      vid.GetSocket(),
 				"status":      status,
@@ -316,7 +316,7 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 				"duration":    duration,
 			},
 		}
-		_, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "setVideo")
+		_, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "setVideo", vid.GetDomain())
 		if err != nil {
 			return true // record creation failed, dont attampt running
 		}
@@ -366,7 +366,7 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 		payload2 := map[string]interface{}{
 			"query": mut,
 			"variables": map[string]string{
-				"schamaname":       vid.GetDomain(),
+				"schemaname":       vid.GetDomain(),
 				"field":            "id",
 				"value":            vid.GetID(),
 				"fieldActionMatch": "status",
@@ -375,7 +375,7 @@ func CheckAndUpdateRecord(vid *vpb.Video, status string) bool {
 		}
 
 		// findone and update
-		_, err = security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideo")
+		_, err = security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideo", vid.GetDomain())
 		if err != nil {
 			return true // record creation failed, dont attampt running
 		}
@@ -424,7 +424,7 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 		},
 	}
 
-	recordRaw, err := security.RunGraphqlQuery(payload, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneVideo")
+	recordRaw, err := security.RunGraphqlQuery(payload, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneVideo", vid.GetDomain())
 	fmt.Printf("Create Record %v %v\n", recordRaw, vid)
 	if err != nil || recordRaw == nil || len(recordRaw) == 0 {
 		fmt.Printf("Error %v", err)
@@ -481,7 +481,7 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 			},
 		}
 
-		recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "setVideo")
+		recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "setVideo", vid.GetDomain())
 		var record structs.Video
 		if err != nil {
 			fmt.Printf("Error %v", err)
@@ -586,7 +586,7 @@ func UpdateMongoRecord(vid *vpb.Video, media []structs.MediaItem, status string,
 				"duration":    record.Duration,
 			},
 		}
-		recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideoObject")
+		recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideoObject", vid.GetDomain())
 		var record2 structs.Video
 		if err != nil {
 			fmt.Printf("Error %v\n", err)
@@ -931,7 +931,7 @@ func ScheduleProfanityCheck(vid *vpb.Video, media []structs.MediaItem) (structs.
 	}
 
 	// findone and update
-	recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideo")
+	recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideo", vid.GetDomain())
 	var record structs.Video
 	if err != nil {
 		return record, err // record creation failed, dont attampt running
@@ -1120,7 +1120,7 @@ func FindOneAndUpdateVideoField(vid structs.Video, field string, value string) (
 	}
 
 	// findone and update
-	recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideo")
+	recordRaw, err := security.RunGraphqlQuery(payload2, "POST", s3credentials.GetS3Data("graphql", "endpoint", ""), "", "findOneAndUpdateVideo", vid.Domain)
 	var record structs.Video
 	if err != nil {
 		fmt.Printf("Error %v\n", err)

@@ -34,11 +34,13 @@ var (
 	}
 	clientOpts = options.Client().ApplyURI(uri).
 			SetAuth(credential)
-	client, err         = mongo.Connect(context.TODO(), clientOpts)
-	jobQueueAddr        = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_video_queue_port", "")
-	jobClient           = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
-	returnJobResultPort = s3credentials.GetS3Data("app", "services", "videoServer")
-	returnJobResultAddr = s3credentials.GetS3Data("app", "prodhost", "")
+	client, err              = mongo.Connect(context.TODO(), clientOpts)
+	jobQueueAddr             = s3credentials.GetS3Data("redis", "redishost", "") + ":" + s3credentials.GetS3Data("redis", "tycoon_systems_video_queue_port", "")
+	jobClient                = asynq.NewClient(asynq.RedisClientOpt{Addr: jobQueueAddr})
+	returnJobResultPort      = s3credentials.GetS3Data("app", "services", "videoServer")
+	returnJobResultAddr      = s3credentials.GetS3Data("app", "prodhost", "")
+	routingServicesProd      = s3credentials.GetS3Data("app", "routingServer", "")
+	routingServicesLocalPort = s3credentials.GetS3Data("app", "routingLocalPort", "")
 )
 
 const (
@@ -150,17 +152,28 @@ func PerformVideoProcess(vid *vpb.Video) error {
 		fmt.Printf("Error scheduling profanity check %v\n", err)
 		return nil
 	}
-	returnFinishedJobReport(finalRecord)
+	returnFinishedJobReport(finalRecord, vid.GetDomain())
 	fmt.Printf("Transcoded Media %v\nLiveItems %v\nDoc %v\nThumbtrack %v\nJob Finished\n", transcodedMedia, liveMediaItems, doc, thumbtrack)
 	return nil
 }
 
-func returnFinishedJobReport(vid structs.Video) {
+func returnFinishedJobReport(vid structs.Video, domain string) {
 	useReturnJobResultAddr := returnJobResultAddr
+	useReturnJobResultPort := returnJobResultPort
+	var connAddr string
 	if os.Getenv("dev") == "true" {
 		useReturnJobResultAddr = "localhost"
+		if domain != "public" {
+			useReturnJobResultPort = routingServicesLocalPort // set to local routing services instance server // MUST CHANGE LATER, INVALID FOR STATIC VIDEO MUST CREATE SERVICE ON ROUTING LOCAL
+		}
+		connAddr = useReturnJobResultAddr + ":" + useReturnJobResultPort
+	} else {
+		connAddr = useReturnJobResultAddr + ":" + useReturnJobResultPort
+		if domain != "public" {
+			connAddr = routingServicesProd // Set to routing services server
+		}
 	}
-	conn, err := grpc.Dial(useReturnJobResultAddr+":"+returnJobResultPort, grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.Dial(connAddr, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		fmt.Printf("Err: %v", err)
 	}
