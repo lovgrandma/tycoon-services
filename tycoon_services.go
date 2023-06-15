@@ -33,6 +33,7 @@ import (
 	vpb "tycoon.systems/tycoon-services/video"
 
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 )
@@ -279,15 +280,15 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 		return
 	}
 
-	err = r.ParseForm()
+	query, err := url.ParseQuery(string(body))
 	if err != nil {
-		log.Println("Error parsing request body:", err)
-		http.Error(w, "Error parsing request body", http.StatusInternalServerError)
+		log.Println("Error parsing query string:", err)
+		http.Error(w, "Error parsing query string", http.StatusInternalServerError)
 		return
 	}
 
 	// Get the value of the "name" field
-	streamKey := r.Form.Get("name")
+	streamKey := query.Get("name")
 	if streamKey == "" {
 		log.Println("Name field is missing")
 		http.Error(w, "Name field is missing", http.StatusBadRequest)
