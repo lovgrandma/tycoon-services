@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 
@@ -34,9 +35,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-
-	sLog "github.com/sirupsen/logrus"
-	"github.com/yutopp/go-rtmp"
 )
 
 const (
@@ -240,38 +238,14 @@ func serveAdCompliantServer() *http.Server {
 	return &http.Server{}
 }
 
-func serveStreamingServer() {
-	tcpAddr, err := net.ResolveTCPAddr("tcp", streamingServicesPort)
+func serveStreamingServer() *http.Server {
+	http.HandleFunc("/stream/publish", handleIngestLiveStreamPublishAuthentication)
+	log.Printf("Media Compliant Server listening at %v", streamingServicesPort)
+	err := http.ListenAndServe(serviceAddress+streamingServicesPort, nil)
 	if err != nil {
-		log.Panicf("Failed: %+v", err)
+		log.Fatalf("Failed to run Media Compliant Server: %v", err)
 	}
-
-	listener, err := net.ListenTCP("tcp", tcpAddr)
-	if err != nil {
-		log.Panicf("Failed: %+v", err)
-	}
-
-	srv := rtmp.NewServer(&rtmp.ServerConfig{
-		OnConnect: func(conn net.Conn) (io.ReadWriteCloser, *rtmp.ConnConfig) {
-			l := sLog.StandardLogger()
-			//l.SetLevel(logrus.DebugLevel)
-
-			h := &Handler{}
-
-			return conn, &rtmp.ConnConfig{
-				Handler: h,
-
-				ControlState: rtmp.StreamControlStateConfig{
-					DefaultBandwidthWindowSize: 6 * 1024 * 1024 / 8,
-				},
-
-				Logger: l,
-			}
-		},
-	})
-	if err := srv.Serve(listener); err != nil {
-		log.Panicf("Failed: %+v", err)
-	}
+	return &http.Server{}
 }
 
 func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWriter) {
@@ -286,8 +260,8 @@ func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWri
 	return false, w
 }
 
-func handleIngestLiveStream(w http.ResponseWriter, r *http.Request) {
-	log.Println("Received request at /stream/ingest")
+func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.Request) {
+	log.Println("Received Publish request at /stream/ingest")
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		// Handle error
@@ -313,7 +287,7 @@ func handleIngestLiveStream(w http.ResponseWriter, r *http.Request) {
 
 		// Send a success response
 		w.WriteHeader(http.StatusOK)
-		log.Printf("Streaming Ingest Began %v", w)
+		fmt.Fprint(w, "yup")
 	} else {
 		// Send an error response for invalid or unauthorized stream key
 		http.Error(w, "Invalid or unauthorized stream key", http.StatusUnauthorized)
