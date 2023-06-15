@@ -262,7 +262,7 @@ func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWri
 
 func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.Request) {
 	log.Println("%v %v %v", r, r.URL, r.Method)
-	log.Println("Received Publish request at /stream/ingest")
+	log.Println("Received Publish request at /stream/publish")
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		// Handle error
