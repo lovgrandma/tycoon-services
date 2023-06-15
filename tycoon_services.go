@@ -279,7 +279,7 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 		return
 	}
 
-	streamKey := r.FormValue("key") // Assuming the stream key is passed as a form parameter named "key"
+	streamKey := r.FormValue("name") // Assuming the stream key is passed as a form parameter named "key"
 
 	// Check if the stream key is valid or authorized
 	if isValidStreamKey(streamKey) {
