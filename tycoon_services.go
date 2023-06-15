@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -274,12 +275,22 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 	// Log the request body
 	log.Println("Request body:", string(body))
 
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	// Parse the request body as JSON
+	var requestBody map[string]interface{}
+	err = json.NewDecoder(r.Body).Decode(&requestBody)
+	if err != nil {
+		log.Println("Failed to parse request body:", err)
+		http.Error(w, "Failed to parse request body", http.StatusBadRequest)
 		return
 	}
 
-	streamKey := r.FormValue("name") // Assuming the stream key is passed as a form parameter named "key"
+	// Access individual values from the request body
+	streamKey, ok := requestBody["name"].(string)
+	if !ok {
+		log.Println("Invalid or missing 'name' field in request body")
+		http.Error(w, "Invalid or missing 'name' field in request body", http.StatusBadRequest)
+		return
+	}
 
 	// Check if the stream key is valid or authorized
 	if isValidStreamKey(streamKey) {
