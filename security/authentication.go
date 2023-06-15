@@ -29,10 +29,10 @@ var (
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
-	returnJobResultPort       = s3credentials.GetS3Data("app", "services", "smsServer")
-	returnJobResultAddr       = s3credentials.GetS3Data("app", "prodhost", "")
-	routingServicesProd       = s3credentials.GetS3Data("app", "routingServerProd", "")
-	routingValidationAuthPort = s3credentials.GetS3Data("app", "routingValidationAuth", "")
+	returnJobResultPort           = s3credentials.GetS3Data("app", "services", "smsServer")
+	returnJobResultAddr           = s3credentials.GetS3Data("app", "prodhost", "")
+	routingServicesProd           = s3credentials.GetS3Data("app", "routingServerProd", "")
+	routingValidationAuthEndpoint = s3credentials.GetS3Data("app", "routingValidationAuthEndpoint", "")
 
 	graphqlClient   = &http.Client{}
 	graphqlEndpoint = s3credentials.GetS3Data("graphql", "endpoint", "")
@@ -44,10 +44,11 @@ func GetGraphqlAuth(domain string) string {
 	var connAddr string
 	if os.Getenv("dev") == "true" {
 		useReturnJobResultAddr = "localhost"
-		if domain != "public" {
-			useReturnJobResultPort = routingValidationAuthPort // set to local routing services instance server
-		}
 		connAddr = useReturnJobResultAddr + ":" + useReturnJobResultPort
+		if domain != "public" {
+			connAddr = routingValidationAuthEndpoint // set to local routing services instance server
+		}
+
 	} else {
 		connAddr = useReturnJobResultAddr + ":" + useReturnJobResultPort
 		if domain != "public" {
