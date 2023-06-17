@@ -53,6 +53,7 @@ var (
 	adPort                = ":" + s3credentials.GetS3Data("app", "services", "adClient")
 	adServerPort          = ":" + s3credentials.GetS3Data("app", "adServerPort", "")
 	streamingServicesPort = ":" + s3credentials.GetS3Data("app", "streamingServicesPort", "")
+	streamingServer       = s3credentials.GetS3Data("app", "streamingServer", "")
 )
 
 type SmsManagementServer struct {
@@ -316,9 +317,12 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 				}
 				log.Printf("Stream Name %v Domain %v", name, domain)
 				// Handle the stream ingestion logic here
-				response := fmt.Sprintf("Name: %s, Domain: %s", name, domain)
-				w.WriteHeader(http.StatusOK)
-				fmt.Fprint(w, response)
+
+				http.Redirect(w, r, streamingServer+"/stream/domain="+domain+"&key="+name, http.StatusSeeOther)
+
+				// response := fmt.Sprintf("Name: %s, Domain: %s", name, domain)
+				// w.WriteHeader(http.StatusOK)
+				// fmt.Fprint(w, response)
 				return
 			}
 		}
