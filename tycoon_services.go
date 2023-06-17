@@ -293,12 +293,14 @@ func handleIncomingStreamPublish(w http.ResponseWriter, r *http.Request) {
 	key := query.Get("key")
 	domain := query.Get("domain")
 	input := query.Get("input")
-	if key == "" || domain == "" || input == "" {
+	bucket := query.Get("bucket")
+	if key == "" || domain == "" || input == "" || bucket == "" {
 		log.Println("A field is missing")
 		http.Error(w, "A field is missing", http.StatusBadRequest)
 		return
 	}
 	// Stream approved
+	log.Println("Stream Approved %v %v %v %v", key, domain, input, bucket)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Stream approved")
 	return
