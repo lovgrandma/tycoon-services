@@ -290,10 +290,12 @@ func handleIncomingStreamPublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the value of the "name" field
-	name := query.Get("name")
-	if name == "" {
-		log.Println("Name field is missing")
-		http.Error(w, "Name field is missing", http.StatusBadRequest)
+	key := query.Get("key")
+	domain := query.Get("domain")
+	input := query.Get("input")
+	if key == "" || domain == "" || input == "" {
+		log.Println("A field is missing")
+		http.Error(w, "A field is missing", http.StatusBadRequest)
 		return
 	}
 	// Stream approved
