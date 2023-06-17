@@ -292,8 +292,8 @@ func handleIncomingStreamPublish(w http.ResponseWriter, r *http.Request) {
 	// Get the value of the "name" field
 	key := query.Get("key")
 	domain := query.Get("domain")
-	input := query.Get("input")
-	if key == "" || domain == "" || input == "" {
+	name := query.Get("name")
+	if key == "" || domain == "" || name == "" {
 		log.Println("A field is missing")
 		http.Error(w, "A field is missing", http.StatusBadRequest)
 		return
@@ -359,7 +359,7 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 				}
 				log.Printf("Stream Name %v Domain %v", name, domain)
 				// Handle the stream ingestion logic here
-				redirectStream := streamingServer + "/stream/?domain=" + domain + "&key=" + name + "&input=" + streamKey
+				redirectStream := streamingServer + "/stream/?domain=" + domain + "&key=" + name + "&name=" + streamKey
 				log.Printf("Redirect Stream %v", redirectStream)
 				http.Redirect(w, r, redirectStream, http.StatusSeeOther)
 
