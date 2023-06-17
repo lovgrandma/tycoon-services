@@ -296,17 +296,35 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 	}
 
 	// Check if the stream key is valid or authorized
-	if isValidStreamKey(streamKey) {
+	if isValidStreamKey(streamKey) == true {
 		// Start processing the incoming stream from OBS
-		// Handle the stream ingestion logic here
-
-		// Send a success response
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "yup")
-	} else {
-		// Send an error response for invalid or unauthorized stream key
-		http.Error(w, "Invalid or unauthorized stream key", http.StatusUnauthorized)
+		log.Printf("Stream Key Valid")
+		domain := GetDomainStreamKey(streamKey)
+		key := GetStreamIdStreamKey(streamKey)
+		user := security.FindUserpByFieldValue(domain, "key", key)
+		var userId string
+		if len(user) != 0 && len(domain) != 0 && len(key) != 0 {
+			if reflect.TypeOf(user["id"]).Kind() == reflect.String {
+				userId = user["id"].(string)
+			}
+			resolvedStream := security.FindLive(domain, "author", userId, "creation", "desc", "", "10")
+			if len(resolvedStream) != 0 {
+				log.Printf("Resolved Streams %v", resolvedStream)
+				var name string
+				if reflect.TypeOf(resolvedStream["id"]).Kind() == reflect.String {
+					name = resolvedStream["id"].(string)
+				}
+				log.Printf("Stream Name %v Domain %v", name, domain)
+				// Handle the stream ingestion logic here
+				response := fmt.Sprintf("Name: %s, Domain: %s", name, domain)
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, response)
+			}
+		}
 	}
+	// Send an error response for invalid or unauthorized stream key
+	w.WriteHeader(http.StatusForbidden)
+	fmt.Fprint(w, "Stream denied")
 }
 
 func GetDomainStreamKey(streamKey string) string {
