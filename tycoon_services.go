@@ -364,6 +364,7 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 				bucket := domain + "-live"
 				redirectStream := streamingServer + "/stream/?domain=" + domain + "&key=" + name + "&input=" + streamKey + "&bucket=" + bucket
 				log.Printf("Redirect Stream %v", redirectStream)
+				w.Header().Set("Location", bucket+"/"+key)
 				http.Redirect(w, r, redirectStream, http.StatusSeeOther)
 
 				// response := fmt.Sprintf("Name: %s, Domain: %s", name, domain)
