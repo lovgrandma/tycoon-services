@@ -300,7 +300,7 @@ func handleIncomingStreamPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Stream approved
-	log.Println("Stream Approved %v %v %v %v", key, domain, input, bucket)
+	log.Printf("Stream Approved %v %v %v %v", key, domain, input, bucket)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "Stream approved")
 	return
