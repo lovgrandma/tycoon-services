@@ -319,12 +319,14 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 				response := fmt.Sprintf("Name: %s, Domain: %s", name, domain)
 				w.WriteHeader(http.StatusOK)
 				fmt.Fprint(w, response)
+				return
 			}
 		}
 	}
 	// Send an error response for invalid or unauthorized stream key
 	w.WriteHeader(http.StatusForbidden)
 	fmt.Fprint(w, "Stream denied")
+	return
 }
 
 func GetDomainStreamKey(streamKey string) string {
