@@ -242,6 +242,7 @@ func serveAdCompliantServer() *http.Server {
 
 func serveStreamingServer() *http.Server {
 	http.HandleFunc("/stream/publish", handleIngestLiveStreamPublishAuthentication)
+	http.HandleFunc("/stream/ingest", handleIncomingStreamPublish)
 	log.Printf("Media Compliant Server listening at %v", streamingServicesPort)
 	err := http.ListenAndServe(serviceAddress+streamingServicesPort, nil)
 	if err != nil {
@@ -260,6 +261,46 @@ func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWri
 		}
 	}
 	return false, w
+}
+
+func handleIncomingStreamPublish(w http.ResponseWriter, r *http.Request) {
+	log.Println("%v %v %v", r, r.URL, r.Method)
+	log.Println("Received Publish request at /stream/ingest")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		// Handle error
+		log.Println("Error reading request body:", err)
+		http.Error(w, "Error reading request body", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the request body
+	log.Println("Request body:", string(body))
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query, err := url.ParseQuery(string(body))
+	if err != nil {
+		log.Println("Error parsing query string:", err)
+		http.Error(w, "Error parsing query string", http.StatusInternalServerError)
+		return
+	}
+
+	// Get the value of the "name" field
+	domain := query.Get("domain")
+	key := query.Get("key")
+	if domain == "" || key == "" {
+		log.Println("Required field is missing")
+		http.Error(w, "Required field is missing", http.StatusBadRequest)
+		return
+	}
+	// Stream approved
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "Stream approved")
+	return
 }
 
 func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.Request) {
