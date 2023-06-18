@@ -367,7 +367,7 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 				w.Header().Set("Location", bucket+"/"+key)
 
 				// Set the appropriate HTTP status code
-				w.WriteHeader(http.StatusSeeOther)
+				w.WriteHeader(http.StatusFound)
 
 				// Write an empty response body
 				// You can omit this part if you don't need to include any content in the response
