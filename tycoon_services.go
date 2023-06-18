@@ -365,7 +365,15 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 				redirectStream := streamingServer + "/stream/?domain=" + domain + "&key=" + name + "&input=" + streamKey + "&bucket=" + bucket + "&name=" + bucket + "/" + key
 				log.Printf("Redirect Stream %v", redirectStream)
 				w.Header().Set("Location", bucket+"/"+key)
-				http.Redirect(w, r, redirectStream, http.StatusSeeOther)
+
+				// Set the appropriate HTTP status code
+				w.WriteHeader(http.StatusSeeOther)
+
+				// Write an empty response body
+				// You can omit this part if you don't need to include any content in the response
+				w.Write([]byte{})
+				// w.Header().Set("Location", bucket+"/"+key)
+				// http.Redirect(w, r, w.Header().Get("Location"), http.StatusSeeOther)
 
 				// response := fmt.Sprintf("Name: %s, Domain: %s", name, domain)
 				// w.WriteHeader(http.StatusOK)
