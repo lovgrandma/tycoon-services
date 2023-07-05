@@ -22,10 +22,12 @@ type User struct {
 /* Message */
 
 type Msg struct {
-	From    string
-	Content string
-	JobId   string
-	Domain  string
+	From     string
+	Content  string
+	JobId    string
+	Domain   string
+	Function string
+	User     string
 }
 
 type Number struct {

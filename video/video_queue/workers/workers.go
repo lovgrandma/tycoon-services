@@ -1,10 +1,11 @@
 package workers
 
 import (
+	"log"
+
+	"github.com/hibiken/asynq"
 	"tycoon.systems/tycoon-services/s3credentials"
 	"tycoon.systems/tycoon-services/video/video_queue"
-	"github.com/hibiken/asynq"
-	"log"
 )
 
 var (
@@ -12,7 +13,7 @@ var (
 )
 
 func main() {
-	
+
 }
 
 func BuildWorkerServer() {
@@ -29,6 +30,7 @@ func BuildWorkerServer() {
 	)
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(video_queue.TypeVideoProcess, video_queue.HandleVideoProcessTask)
+	mux.HandleFunc(video_queue.TypeLivestreamThumbnailProcess, video_queue.HandleLivestreamThumbnailProcessTask)
 	if err := srv.Run(mux); err != nil {
 		log.Printf("Could not run Job Queue Server: %v", err)
 	}

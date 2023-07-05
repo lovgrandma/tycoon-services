@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package network;
+
+option go_package = "tycoon.systems/tycoon-services;tycoon_services";
+
+/* Methods that must be consumed by Node.js must start with lowercase.
+Methods that must be consumed by Go must start with uppercase. */
+
+service networkManagement {
+    rpc notifyRoom (Msg) returns (Msg) {}
+}
+
+message Msg {
+    string      From = 1;
+    string      Domain = 2;
+    string      Content = 3;
+    string      JobId = 4;
+    string      Function = 5;
+    string      User = 6;
+}

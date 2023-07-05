@@ -14,6 +14,7 @@ import (
 
 	"tycoon.systems/tycoon-services/ad/ad_queue"
 	ad_workers "tycoon.systems/tycoon-services/ad/ad_queue/workers"
+	network_functions "tycoon.systems/tycoon-services/network_functions"
 	"tycoon.systems/tycoon-services/s3credentials"
 	"tycoon.systems/tycoon-services/security"
 	"tycoon.systems/tycoon-services/sms/sms_queue"
@@ -54,6 +55,7 @@ var (
 	adServerPort          = ":" + s3credentials.GetS3Data("app", "adServerPort", "")
 	streamingServicesPort = ":" + s3credentials.GetS3Data("app", "streamingServicesPort", "")
 	streamingServer       = s3credentials.GetS3Data("app", "streamingServer", "")
+	StreamOnLocalDev      = s3credentials.GetS3Data("app", "StreamOnLocalDev", "")
 )
 
 type SmsManagementServer struct {
@@ -241,8 +243,8 @@ func serveAdCompliantServer() *http.Server {
 }
 
 func serveStreamingServer() *http.Server {
-	http.HandleFunc("/stream/publish", handleIngestLiveStreamPublishAuthentication)
-	http.HandleFunc("/stream/ingest", handleIncomingStreamPublish)
+	http.HandleFunc("/stream/publish", handleLiveStreamPublishAuthentication)
+	http.HandleFunc("/stream/ingest", handleIncomingLiveStreamIngest)
 	log.Printf("Media Compliant Server listening at %v", streamingServicesPort)
 	err := http.ListenAndServe(serviceAddress+streamingServicesPort, nil)
 	if err != nil {
@@ -263,7 +265,7 @@ func matchOrigin(w http.ResponseWriter, r *http.Request) (bool, http.ResponseWri
 	return false, w
 }
 
-func handleIncomingStreamPublish(w http.ResponseWriter, r *http.Request) {
+func handleIncomingLiveStreamIngest(w http.ResponseWriter, r *http.Request) {
 	log.Println("%v %v %v", r, r.URL, r.Method)
 	log.Println("Received Publish request at /stream/ingest")
 	body, err := io.ReadAll(r.Body)
@@ -289,24 +291,31 @@ func handleIncomingStreamPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the value of the "name" field
-	key := query.Get("key")
-	domain := query.Get("domain")
-	input := query.Get("input")
-	bucket := query.Get("bucket")
-	if key == "" || domain == "" || input == "" || bucket == "" {
-		log.Println("A field is missing")
-		http.Error(w, "A field is missing", http.StatusBadRequest)
-		return
-	}
+	// // Get the value of the "name" field
+	// key := query.Get("key")
+	// domain := query.Get("domain")
+	// input := query.Get("input")
+	// bucket := query.Get("bucket")
+	// if key == "" || domain == "" || input == "" || bucket == "" {
+	// 	log.Println("A field is missing")
+	// 	http.Error(w, "A field is missing", http.StatusBadRequest)
+	// 	return
+	// }
 	// Stream approved
-	log.Printf("Stream Approved %v %v %v %v", key, domain, input, bucket)
+	log.Printf("Stream Approved %v", query)
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "Stream approved")
-	return
+	time.Sleep(7 * time.Second)
+	app := query.Get("app")
+	name := query.Get("name")
+	domain := query.Get("domain")
+	path := query.Get("path")
+	cdn := query.Get("cdn")
+	if app != "" && name != "" {
+		video_queue.ProvisionLivestreamThumbnailJob(&vpb.Video{Status: "processing", ID: name, Socket: "", Destination: cdn, Filename: name, Path: path, Domain: domain})
+	}
 }
 
-func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.Request) {
+func handleLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.Request) {
 	log.Println("%v %v %v", r, r.URL, r.Method)
 	log.Println("Received Publish request at /stream/publish")
 	body, err := io.ReadAll(r.Body)
@@ -348,9 +357,13 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 		key := GetStreamIdStreamKey(streamKey)
 		user := security.FindUserpByFieldValue(domain, "key", key)
 		var userId string
+		var userName string
 		if len(user) != 0 && len(domain) != 0 && len(key) != 0 {
 			if reflect.TypeOf(user["id"]).Kind() == reflect.String {
 				userId = user["id"].(string)
+			}
+			if reflect.TypeOf(user["username"]).Kind() == reflect.String {
+				userName = user["username"].(string)
 			}
 			resolvedStream := security.FindLive(domain, "author", userId, "creation", "desc", "", "10")
 			if len(resolvedStream) != 0 {
@@ -359,15 +372,34 @@ func handleIngestLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.
 				if reflect.TypeOf(resolvedStream["id"]).Kind() == reflect.String {
 					name = resolvedStream["id"].(string)
 				}
-				log.Printf("Stream Name %v Domain %v", name, domain)
+				p := structs.Msg{
+					From:     userId,
+					Content:  name,
+					JobId:    key,
+					Domain:   domain,
+					Function: "",
+					User:     userName,
+				}
+				network_functions.NotifyRoom(p)
+
 				// Handle the stream ingestion logic here
 				bucket := domain + "_live"
 				// redirectStream := streamingServer + "/stream/?domain=" + domain + "&key=" + name + "&input=" + streamKey + "&bucket=" + bucket + "&name=" + bucket + "/" + key
 				// log.Printf("Redirect Stream %v", redirectStream)
-				w.Header().Set("Location", streamingServer+"/hls_"+bucket+"/"+name)
+				addDev := ""
+				if StreamOnLocalDev == "true" {
+					addDev = "_local"
+				}
+				redirectStreamUrl := streamingServer + "/hls_" + bucket + addDev + "/" + name
+				addDevPath := ""
+				if addDev != "" {
+					addDevPath = "_dev"
+				}
+				cdn := s3credentials.GetS3Data("business", "live", domain)
+				w.Header().Set("Location", redirectStreamUrl+"?domain="+domain+"&path="+bucket+addDevPath+"&cdn="+cdn)
+				log.Printf("Stream Name %v Domain %v Bucket %v Redirect Url %v", name, domain, bucket, redirectStreamUrl)
 				// http.Redirect(w, r, streamingServer+"/hls-live/"+bucket+"/"+key, http.StatusFound)
 				w.WriteHeader(http.StatusFound)
-
 				// response := fmt.Sprintf("Name: %s, Domain: %s", name, domain)
 				// w.WriteHeader(http.StatusOK)
 				// fmt.Fprint(w, response)

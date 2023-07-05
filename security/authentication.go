@@ -55,7 +55,7 @@ func GetGraphqlAuth(domain string) string {
 			connAddr = routingServicesProd // Set to routing services server
 		}
 	}
-	fmt.Printf("Auth for Graphql Token from: " + connAddr)
+	// fmt.Printf("Auth for Graphql Token from: " + connAddr)
 	conn, err := grpc.Dial(connAddr, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		fmt.Printf("Err: %v", err)
