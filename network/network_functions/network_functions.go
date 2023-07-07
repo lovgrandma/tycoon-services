@@ -16,8 +16,10 @@ import (
 )
 
 var (
-	returnJobResultPort = s3credentials.GetS3Data("app", "services", "networkServer")
-	returnJobResultAddr = s3credentials.GetS3Data("app", "prodhost", "")
+	returnJobResultPort           = s3credentials.GetS3Data("app", "services", "smsServer")
+	returnJobResultAddr           = s3credentials.GetS3Data("app", "prodhost", "")
+	routingServicesProd           = s3credentials.GetS3Data("app", "routingServerProd", "")
+	routingValidationAuthEndpoint = s3credentials.GetS3Data("app", "routingValidationAuthEndpoint", "")
 )
 
 func main() {
@@ -25,12 +27,28 @@ func main() {
 }
 
 func NotifyRoom(msg structs.Msg) {
+	// useReturnJobResultAddr := returnJobResultAddr
+	// if os.Getenv("dev") == "true" {
+	// 	useReturnJobResultAddr = "localhost"
+	// }
+
 	useReturnJobResultAddr := returnJobResultAddr
+	useReturnJobResultPort := returnJobResultPort
+	var connAddr string
 	if os.Getenv("dev") == "true" {
 		useReturnJobResultAddr = "localhost"
+		connAddr = useReturnJobResultAddr + ":" + useReturnJobResultPort
+		if msg.Domain != "tycoon" {
+			connAddr = routingValidationAuthEndpoint // set to local routing services instance server
+		}
+	} else {
+		connAddr = useReturnJobResultAddr + ":" + useReturnJobResultPort
+		if msg.Domain != "tycoon" {
+			connAddr = routingServicesProd // Set to routing services server
+		}
 	}
-	fmt.Printf("Conn Notif %v %v", useReturnJobResultAddr, returnJobResultPort)
-	conn, err := grpc.Dial(useReturnJobResultAddr+":"+returnJobResultPort, grpc.WithInsecure(), grpc.WithBlock())
+	fmt.Printf("Conn Addr %v Other %v %v", connAddr, useReturnJobResultAddr, returnJobResultPort)
+	conn, err := grpc.Dial(connAddr, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		fmt.Printf("Err: %v", err)
 	}
