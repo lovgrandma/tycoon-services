@@ -55,6 +55,7 @@ var (
 	adServerPort          = ":" + s3credentials.GetS3Data("app", "adServerPort", "")
 	streamingServicesPort = ":" + s3credentials.GetS3Data("app", "streamingServicesPort", "")
 	streamingServer       = s3credentials.GetS3Data("app", "streamingServer", "")
+	streamDev             = s3credentials.GetS3Data("app", "streamDev", "")
 	StreamOnLocalDev      = s3credentials.GetS3Data("app", "StreamOnLocalDev", "")
 )
 
@@ -392,7 +393,7 @@ func handleLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.Reques
 				}
 				redirectStreamUrl := streamingServer + "/hls_" + bucket + addDev + "/" + name
 				addDevPath := ""
-				if addDev != "" {
+				if addDev != "" || streamDev == "true" {
 					addDevPath = "_dev"
 				}
 				cdn := s3credentials.GetS3Data("business", "live", domain)
