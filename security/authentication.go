@@ -32,6 +32,7 @@ var (
 	returnJobResultPort           = s3credentials.GetS3Data("app", "services", "smsServer")
 	returnJobResultAddr           = s3credentials.GetS3Data("app", "prodhost", "")
 	routingServicesProd           = s3credentials.GetS3Data("app", "routingServerProd", "")
+	routingServicesNetworkgRPC    = s3credentials.GetS3Data("app", "routingServerNetworkgRPC", "")
 	routingValidationAuthEndpoint = s3credentials.GetS3Data("app", "routingValidationAuthEndpoint", "")
 
 	graphqlClient   = &http.Client{}
@@ -48,11 +49,10 @@ func GetGraphqlAuth(domain string) string {
 		if domain != "public" {
 			connAddr = routingValidationAuthEndpoint // set to local routing services instance server
 		}
-
 	} else {
 		connAddr = useReturnJobResultAddr + ":" + useReturnJobResultPort
 		if domain != "public" {
-			connAddr = routingServicesProd // Set to routing services server
+			connAddr = routingServicesNetworkgRPC // Set to routing services server
 		}
 	}
 	// fmt.Printf("Auth for Graphql Token from: " + connAddr)
