@@ -52,7 +52,7 @@ func GetGraphqlAuth(domain string) string {
 	} else {
 		connAddr = useReturnJobResultAddr + ":" + useReturnJobResultPort
 		if domain != "public" {
-			connAddr = routingServicesNetworkgRPC // Set to routing services server
+			connAddr = routingValidationAuthEndpoint // Set to routing services server
 		}
 	}
 	// fmt.Printf("Auth for Graphql Token from: " + connAddr)

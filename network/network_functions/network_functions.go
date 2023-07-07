@@ -19,6 +19,7 @@ var (
 	returnJobResultPort           = s3credentials.GetS3Data("app", "services", "smsServer")
 	returnJobResultAddr           = s3credentials.GetS3Data("app", "prodhost", "")
 	routingServicesProd           = s3credentials.GetS3Data("app", "routingServerProd", "")
+	routingServicesNetworkgRPC    = s3credentials.GetS3Data("app", "routingServerNetworkgRPC", "")
 	routingValidationAuthEndpoint = s3credentials.GetS3Data("app", "routingValidationAuthEndpoint", "")
 )
 
@@ -44,7 +45,7 @@ func NotifyRoom(msg structs.Msg) {
 	} else {
 		connAddr = useReturnJobResultAddr + ":" + useReturnJobResultPort
 		if msg.Domain != "tycoon" {
-			connAddr = routingServicesProd // Set to routing services server
+			connAddr = routingServicesNetworkgRPC // Set to routing services server
 		}
 	}
 	fmt.Printf("Conn Addr %v Other %v %v", connAddr, useReturnJobResultAddr, returnJobResultPort)
