@@ -393,13 +393,15 @@ func handleLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.Reques
 				}
 				redirectStreamUrl := streamingServer + "/hls_" + bucket + addDev + "/" + name
 				addDevPath := ""
-				if addDev != "" || streamDev == "true" {
+				if addDev != "" {
+					addDevPath = "_dev"
+				} else if streamDev == "true" {
 					addDevPath = "_dev"
 				}
 				cdn := s3credentials.GetS3Data("business", "live", domain)
 				if cdn != "nomatch" {
 					w.Header().Set("Location", redirectStreamUrl+"?domain="+domain+"&path="+bucket+addDevPath+"&cdn="+cdn)
-					log.Printf("Stream Name %v Domain %v Bucket %v Redirect Url %v", name, domain, bucket, redirectStreamUrl)
+					log.Printf("Stream Name %v Domain %v Bucket %v Redirect Url %v All %v", name, domain, bucket+addDevPath, redirectStreamUrl, redirectStreamUrl+"?domain="+domain+"&path="+bucket+addDevPath+"&cdn="+cdn)
 					// http.Redirect(w, r, streamingServer+"/hls-live/"+bucket+"/"+key, http.StatusFound)
 					w.WriteHeader(http.StatusFound)
 				}
