@@ -389,11 +389,12 @@ func handleLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.Reques
 				// log.Printf("Redirect Stream %v", redirectStream)
 				addDev := ""
 				addDevPath := ""
-				if StreamOnLocalDev == "true" {
+				if StreamOnLocalDev == "true" && streamDev == "true" {
 					addDev = "_local"
+				} else if streamDev == "true" && StreamOnLocalDev != "true" {
+					addDev = "_dev"
 				}
 				if streamDev == "true" {
-					addDev = "_dev"
 					addDevPath = "_dev"
 				}
 				redirectStreamUrl := streamingServer + "/hls_" + bucket + addDev + "/" + name
@@ -403,7 +404,7 @@ func handleLiveStreamPublishAuthentication(w http.ResponseWriter, r *http.Reques
 				}
 				cdn := s3credentials.GetS3Data("business", "live", domain)
 				if cdn != "nomatch" {
-					w.Header().Set("Location", redirectStreamUrl+"?domain="+domain+"&path="+bucket+addDevPath+"&cdn="+cdn)
+					w.Header().Set("Location", redirectStreamUrl+"?domain="+domain+"&path="+bucket+addDevPath+addDev+"&cdn="+cdn)
 					log.Printf("Stream Name %v Domain %v Bucket %v Redirect Url %v All %v", name, domain, bucket+addDevPath, redirectStreamUrl, redirectStreamUrl+"?domain="+domain+"&path="+bucket+addDevPath+"&cdn="+cdn)
 					// http.Redirect(w, r, streamingServer+"/hls-live/"+bucket+"/"+key, http.StatusFound)
 					w.WriteHeader(http.StatusFound)
