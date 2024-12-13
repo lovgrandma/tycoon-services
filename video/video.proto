@@ -4,9 +4,6 @@ package video;
 
 option go_package = "tycoon.systems/tycoon-services;tycoon_services";
 
-/* Methods that must be consumed by Node.js must start with lowercase.
-Methods that must be consumed by Go must start with uppercase. */
-
 service videoManagement {
     rpc CreateNewVideoUpload (NewVideo) returns (Video) {}
     rpc returnVideoJobResult (Video) returns (Video) {}
